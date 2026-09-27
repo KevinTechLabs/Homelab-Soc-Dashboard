@@ -437,7 +437,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
     <div class="two">
       <div class="stack">
         <div class="card">
-          <div class="ch"><h3>Hostile sources</h3><span class="meta" id="srcMeta"></span></div>
+          <div class="ch"><h3>Hostile sources</h3><span class="meta" id="srcMeta"></span><button class="btn" id="srcClear" style="margin-left:10px;padding:4px 10px;font-size:12.5px">Clear list</button></div>
           <div class="cb"><div class="blocklist" id="blocklist"></div><p class="note" id="fwNote" hidden></p></div>
         </div>
         <div class="card" id="pfCard">
@@ -716,6 +716,7 @@ const Demo=(()=>{
       const m={ack:['ack','Acknowledged from the dashboard'],escalate:['escalated','Escalated for investigation'],close:['closed','Closed from the dashboard'],reopen:['new','Reopened']}[body.action];
       a.status=m[0];if(body.action!=='reopen'){a.ackAt=a.ackAt||t;a.owner='You';}a.log.push([t,m[1]]);return{message:a.id+' updated'};}
     if(path==='block'){blocked.add(body.ip);ev(t,'DROP',body.ip+' blocked (from dashboard)','system');alerts.forEach(a=>{if(a.src===body.ip&&a.status!=='closed')a.log.push([t,body.ip+' blocked.']);});return{message:body.ip+' blocked.'};}
+    if(path==='sources'){let n=0;Object.keys(sources).forEach(ip=>{if(!blocked.has(ip)){delete sources[ip];n++;}});return{message:n?`Cleared ${n} source${n>1?'s':''}. Blocked addresses stay listed.`:'Nothing to clear.'};}
     if(path==='unblock'){blocked.delete(body.ip);ev(t,'INFO',body.ip+' unblocked (from dashboard)','system');return{message:body.ip+' unblocked.'};}
     if(path==='settings'){if('autoblock' in body){settings.autoblock=!!body.autoblock;return{message:'Automatic blocking '+(settings.autoblock?'on':'off')};}
       if(body.notify){const n=body.notify;['enabled','summary','minSev','summaryHour','tz'].forEach(k=>{if(k in n&&n[k]!=='')settings.notify[k]=n[k];});if('webhook' in n){settings.notify.webhookSet=!!n.webhook;settings.notify.webhookName=n.webhook?'Sentinel (demo)':'';return{message:n.webhook?'Connected to Sentinel (demo)':'Discord disconnected'};}return{message:body.message||'Notification settings saved'};}}
@@ -1034,6 +1035,7 @@ function renderRespond(){
   const scol={active:C.ok,failed:C.crit,inactive:C.ink3,activating:C.med,deactivating:C.med};
   $('#services').innerHTML=sv.length?sv.map(s=>`<div class="rw"><span class="hd" style="background:${scol[s.state]||C.ink3}"></span><span class="nm">${esc(s.name)}<small>${esc(s.desc)}</small></span><span class="st" style="color:${scol[s.state]||C.ink3}">${s.state==='active'?'Running':s.state==='inactive'?'Stopped':s.state==='failed'?'Failed':esc(s.state)}</span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">No watched services found.</p>';
 }
+$('#srcClear').addEventListener('click',()=>act('sources',{action:'clear'}));
 $('#blocklist').addEventListener('click',e=>{const b=e.target.closest('[data-ip]');if(b)act(b.dataset.a,{ip:b.dataset.ip});});
 
 /* ---------- attacker locations ---------- */

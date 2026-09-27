@@ -37,7 +37,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.5.1"
+VERSION = "1.5.2"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -224,7 +224,7 @@ class Store:
         self.settings["notify"].update({k: v for k, v in st.get("notify", {}).items() if k in NOTIFY_DEFAULTS})
         cutoff = now_ms() - 7 * 86400000
         for s in d.get("sources", []):
-            if s.get("last", 0) > cutoff and not (s.get("lan") and not s.get("fails")):
+            if s.get("last", 0) > cutoff and not (s.get("lan") and not s.get("fails")) and not not_a_host(s.get("ip", "")):
                 s["users"] = set(s.get("users", []))
                 s["ports"] = set(s.get("ports", []))
                 self.sources[s["ip"]] = s
@@ -1176,7 +1176,16 @@ def unblock_ip(ip):
     return False, " ".join(errs) or "%s wasn't blocked." % ip
 
 
-STRAY_UDP_SPORTS = {"53", "123", "443", "853", "3478", "5349", "19302"}
+def not_a_host(ip):
+    """0.0.0.0 (devices asking DHCP for an address), broadcast, multicast and reserved addresses aren't attackers."""
+    try:
+        a = ipaddress.ip_address(ip)
+        return a.is_unspecified or a.is_multicast or a.is_reserved or a.is_link_local or str(a) == "255.255.255.255"
+    except ValueError:
+        return True
+
+
+STRAY_UDP_SPORTS ={"53", "123", "443", "853", "3478", "5349", "19302"}
 
 
 def is_stray(proto, rest):
@@ -1216,7 +1225,7 @@ def pf_filterlog(msg, t):
     if action != "block":
         return True
     src = norm_ip(src) or src
-    if is_private(src) or src in S.my_ips:
+    if is_private(src) or src in S.my_ips or not_a_host(src):
         return True
     if is_stray(proto, rest):
         S.counts.append((t, "stray"))
@@ -2241,6 +2250,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Unknown action"})
                 S.dirty = True
                 return self._send(200, {"ok": True, "message": "%s updated" % a["id"]})
+            if path == "/api/sources":
+                if body.get("action") == "clear":
+                    keep = S.blocked | S.pf["edgeBlocked"]
+                    gone = [ip for ip in S.sources if ip not in keep]
+                    for ip in gone:
+                        S.sources.pop(ip, None)
+                        S.pf["recent"].pop(ip, None)
+                        S.fails.pop(ip, None)
+                        S.fw_ports.pop(ip, None)
+                    S.dirty = True
+                    add_event(t, "INFO", "Hostile sources list cleared from the dashboard (%d removed)" % len(gone), "system")
+                    return self._send(200, {"ok": True, "message": ("Cleared %d source%s. Blocked addresses stay listed." % (len(gone), "" if len(gone) == 1 else "s")) if gone else "Nothing to clear."})
+                return self._send(400, {"error": "Unknown action"})
             if path == "/api/lan-sweep":
                 DEV_EVT.set()
                 return self._send(200, {"ok": True, "message": "Scanning your network. New devices show up in about a minute."})

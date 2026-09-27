@@ -12,7 +12,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
 - **MITRE ATT&CK mapping** for every alert, plus an ATT&CK tactic heat map on the dashboard.
 - **pfSense integration:** router firewall logs over syslog, device discovery in every VLAN from DHCP events, and optional network-wide blocking through pfSense `easyrule`.
 - **Network visibility:** device discovery (arp-scan, ping, pfSense DHCP), vendor lookup, risky-port checks per device, ARP-spoofing detection, and the Tailscale device list.
-- **Response actions:** block and unblock attackers (ufw on the server, or pfSense for the whole network), optional auto-block, and alert acknowledge, escalate and close.
+- **Response actions:** block and unblock attackers (ufw on the server, or pfSense for the whole network), optional auto-block, alert acknowledge, escalate and close, and a one-click clear of the hostile-sources list (blocked addresses stay).
 - **Discord notifications:** rate-limited alerts for high and critical events, plus a daily summary in your time zone.
 - **Runs anywhere you look:** a responsive web app (installable on phone and PC), a Windows app-window launcher, and an optional Electron desktop build.
 - **Secure by default:** the API listens on localhost behind nginx, actions need an access key, and the webhook is never sent to the browser.
