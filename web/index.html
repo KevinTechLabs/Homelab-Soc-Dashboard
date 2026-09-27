@@ -55,7 +55,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
 /* ---------- header ---------- */
-.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--ground);border-bottom:1px solid var(--line);margin-inline:-16px;padding:14px 16px}
+.top{position:sticky;top:0;z-index:10;background:var(--ground);border-bottom:1px solid var(--line);margin-inline:-16px;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 14px}
 .top-in{max-width:1180px;margin:0 auto;width:100%;display:flex;align-items:center;gap:10px}
 .brand{display:flex;align-items:center;gap:12px;margin-right:auto;min-width:0;flex:1 1 auto;overflow:hidden}
 .brand svg{flex:none}
@@ -890,18 +890,21 @@ function buildMap(){
   const rx=Math.max(40,mw/2-pad-cw/2);
   const angles=[];for(let i=0;i<n;i++){const k=Math.ceil(i/2)*(i%2?1:-1);angles.push(-Math.PI/2+k*(2*Math.PI/Math.max(n,1)));}
   let ry=120,cards=[],hub,need;
+  let zones=[];
   if(narrow){
-    // phone: router on top, the rest in two columns with the server between them
-    const rows=[];const rest=ring.filter(d=>!d.gateway),gw=ring.find(d=>d.gateway);
-    const top=bandBottom+12;let y0=top;
-    if(gw){cards.push({d:gw,x:(mw-cw)/2,y:y0,w:cw,h:ch});y0+=ch+26;}
-    const L=[],Rr=[];rest.forEach((d,i)=>(i%2?Rr:L).push(d));
-    const rowsN=Math.max(L.length,Rr.length,1),step=ch+12;
-    L.forEach((d,i)=>cards.push({d,x:pad,y:y0+i*step,w:cw,h:ch}));
-    Rr.forEach((d,i)=>cards.push({d,x:mw-pad-cw,y:y0+i*step+(L.length>Rr.length?step/2:0),w:cw,h:ch}));
-    const colH=rowsN*step-12;
-    hub={x:mw/2,y:y0+Math.max(colH/2,40),r:24,d:self};
-    need=Math.round(Math.max(y0+colH,hub.y+hub.r+44)+pad);
+    // phone: internet -> router -> server, then one box per zone with its devices in a two-column grid
+    const gw=ring.find(d=>d.gateway),rest=ring.filter(d=>!d.gateway);
+    let y0=bandBottom+12;const rw=Math.min(230,mw-2*pad),rh=48;
+    if(gw){cards.push({d:gw,x:(mw-rw)/2,y:y0,w:rw,h:rh});y0+=rh+30;}
+    hub={x:mw/2,y:y0+24,r:24,d:self};y0=hub.y+hub.r+30;
+    const groups=[];rest.forEach(d=>{const k=mz?(d.zone||'Other'):'Home network';let g=groups.find(x=>x.name===k);if(!g)groups.push(g={name:k,devs:[]});g.devs.push(d);});
+    if(mz)groups.sort((a,b)=>zoneRank(a.devs[0])-zoneRank(b.devs[0]));
+    const bx=pad,bw=mw-2*pad,ip=10,gap=8,head=30,zc=(bw-2*ip-gap)/2,zh=46;
+    groups.forEach(g=>{g.devs.sort((a,b)=>(b.online-a.online)||order(a)-order(b)||devLabel(a).localeCompare(devLabel(b)));
+      const rows=Math.ceil(g.devs.length/2),h=head+rows*(zh+gap)+ip-gap+2;const z={name:g.name,x:bx,y:y0,w:bw,h,n:g.devs.length,on:g.devs.filter(d=>d.online).length};zones.push(z);
+      g.devs.forEach((d,i)=>cards.push({d,zone:z,x:bx+ip+(i%2)*(zc+gap),y:y0+head+Math.floor(i/2)*(zh+gap),w:zc,h:zh}));
+      y0+=h+22;});
+    need=Math.round(y0-22+pad+4);
   } else {
   for(let tries=0;tries<80;tries++){
     const cy0=bandBottom+ch/2+14+ry;
@@ -915,13 +918,18 @@ function buildMap(){
   }
   if(Math.abs(need-mh)>4){mbox.style.height=need+'px';requestAnimationFrame(sizeMap);}
   const router=cards.find(c=>c.d.gateway)||null;
-  M={pills,cards,hub,router,bandBottom,more,narrow,mz};
+  M={pills,cards,hub,router,bandBottom,more,narrow,mz,zones};
   if(selNode){const k=selNode.key;selNode=[...pills,...cards].find(o=>(o.d?o.d.mac:o.ip)===k)||(k==='hub'?hub:null);if(selNode)selNode.key=k;}
 }
 // geometry helpers
 function cardEdge(c,tx,ty){const cx=c.x+c.w/2,cy=c.y+c.h/2,dx=tx-cx,dy=ty-cy;const k=Math.min(Math.abs((c.w/2)/(dx||1e-6)),Math.abs((c.h/2)/(dy||1e-6)));return [cx+dx*k,cy+dy*k];}
 function curve(c){const H=M.hub,[ex,ey]=cardEdge(c,H.x,H.y);const a=Math.atan2(ey-H.y,ex-H.x);const sx=H.x+Math.cos(a)*(H.r+10),sy=H.y+Math.sin(a)*(H.r+10);
   const mx=(sx+ex)/2,my=(sy+ey)/2,nx=-(ey-sy),ny=ex-sx,L=Math.hypot(nx,ny)||1,bend=.12;return [[sx,sy],[mx+nx/L*Math.hypot(ex-sx,ey-sy)*bend,my+ny/L*Math.hypot(ex-sx,ey-sy)*bend],[ex,ey]];}
+function linkPts(c){const H=M.hub;
+  if(!M.narrow)return sampleQ(curve(c));
+  if(c===M.router)return [[H.x,H.y-H.r-10],[c.x+c.w/2,c.y+c.h]];
+  const z=c.zone;if(!z)return sampleQ(curve(c));
+  return [[H.x,H.y+H.r+10],[H.x,z.y],[H.x,z.y+14],[c.x+c.w/2,z.y+14],[c.x+c.w/2,c.y+c.h/2]];}
 const qAt=(q,t)=>[(1-t)*(1-t)*q[0][0]+2*(1-t)*t*q[1][0]+t*t*q[2][0],(1-t)*(1-t)*q[0][1]+2*(1-t)*t*q[1][1]+t*t*q[2][1]];
 function pillToRouter(p){const R=M.router;const tx=R?R.x+R.w/2:M.hub.x,ty=R?R.y:M.hub.y-M.hub.r;return [[p.x+p.w/2,p.y+p.h],[p.x+p.w/2,M.bandBottom-8],[tx,M.bandBottom-8],[tx,ty]];}
 function polyAt(pts,t){let L=0;const seg=[];for(let i=1;i<pts.length;i++){const l=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);seg.push(l);L+=l;}let d=t*L;for(let i=0;i<seg.length;i++){if(d<=seg[i]||i===seg.length-1){const k=seg[i]?d/seg[i]:0;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*k,pts[i][1]+(pts[i+1][1]-pts[i][1])*k];}d-=seg[i];}return pts[pts.length-1];}
@@ -937,6 +945,16 @@ function drawMap(){
   if(M.pills.length){const R=M.router,tx=R?R.x+R.w/2:H.x,xs=M.pills.map(p=>p.x+p.w/2);g.beginPath();g.moveTo(Math.min(...xs,tx),M.bandBottom-8);g.lineTo(Math.max(...xs,tx),M.bandBottom-8);g.stroke();
     M.pills.forEach(p=>{g.beginPath();g.moveTo(p.x+p.w/2,p.y+p.h);g.lineTo(p.x+p.w/2,M.bandBottom-8);g.stroke();});
     g.beginPath();g.moveTo(tx,M.bandBottom-8);g.lineTo(tx,R?R.y:H.y-H.r);g.stroke();}
+  if(M.narrow){
+    // router -> server, then one trunk down through the zone boxes
+    if(M.router){const R=M.router;g.beginPath();g.moveTo(R.x+R.w/2,R.y+R.h);g.lineTo(H.x,H.y-H.r-10);g.strokeStyle=(S.net?.peers||[]).some(p=>!p.lan)?'rgba(69,198,230,.55)':C.line;g.lineWidth=1.6;g.stroke();}
+    const last=M.zones[M.zones.length-1];
+    if(last){g.beginPath();g.moveTo(H.x,H.y+H.r+10);g.lineTo(H.x,last.y);g.strokeStyle=C.line;g.lineWidth=1.6;g.stroke();}
+    M.zones.forEach(z=>{rr(g,z.x,z.y,z.w,z.h,14);g.fillStyle='rgba(12,22,36,.92)';g.fill();g.strokeStyle=C.line;g.lineWidth=1.2;g.stroke();
+      g.beginPath();g.arc(H.x,z.y,3.5,0,7);g.fillStyle=C.cyan;g.fill();
+      g.font='700 10.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink2;g.textAlign='left';g.textBaseline='middle';g.fillText(z.name.toUpperCase(),z.x+12,z.y+16);
+      g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;g.textAlign='right';g.fillText(`${z.on}/${z.n} online`,z.x+z.w-12,z.y+16);});
+  } else
   // hub-to-card curves
   M.cards.forEach(c=>{const q=curve(c),talk=lanPeers.has(c.d.ip)||(c===M.router&&(S.net?.peers||[]).some(p=>!p.lan));
     g.beginPath();g.moveTo(...q[0]);g.quadraticCurveTo(...q[1],...q[2]);g.strokeStyle=talk?(c===M.router?'rgba(69,198,230,.55)':'rgba(169,139,250,.6)'):(c.d.online?C.line:'rgba(35,50,74,.5)');g.lineWidth=talk?2:1.2;g.setLineDash(c.d.online?[]:[3,5]);g.stroke();g.setLineDash([]);});
@@ -959,9 +977,9 @@ function drawMap(){
     const ix=c.x+(M.narrow?18:22),iy=c.y+c.h/2;g.font=`${M.narrow?16:19}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(devIcon(d),ix,iy+1);
     g.beginPath();g.arc(c.x+c.w-11,c.y+11,3.8,0,7);g.fillStyle=d.online?C.ok:C.ink3;g.fill();
     const tx=c.x+(M.narrow?34:42),maxW=c.x+c.w-tx-16;
-    g.textAlign='left';g.font=`600 ${M.narrow?11.5:12.5}px -apple-system,system-ui,sans-serif`;g.fillStyle=C.ink;g.fillText(trunc(devLabel(d),maxW,g.font),tx,c.y+c.h/2-8);
+    g.textAlign='left';g.font=`600 ${M.narrow?12.5:12.5}px -apple-system,system-ui,sans-serif`;g.fillStyle=C.ink;g.fillText(trunc(devLabel(d),maxW,g.font),tx,c.y+c.h/2-8);
     const badge=w===0?['RISK',C.crit]:w===1?['RISK',C.high]:needsReview(d)?['NEW',C.cyan]:null;
-    g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;let sub=(M.mz&&d.zone&&!d.gateway?d.zone+' · ':'')+(d.online?d.ip:'offline');
+    g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;let sub=(M.mz&&d.zone&&!d.gateway&&!M.narrow?d.zone+' · ':'')+(d.online?d.ip:'offline · '+ago(d.last));
     if(badge){g.font='700 9px -apple-system,system-ui,sans-serif';const bw=textW(badge[0],g.font)+10;rr(g,c.x+c.w-bw-7,c.y+c.h-20,bw,14,4);g.fillStyle=badge[1]+'2e';g.fill();g.fillStyle=badge[1];g.textAlign='center';g.fillText(badge[0],c.x+c.w-7-bw/2,c.y+c.h-12.5);g.textAlign='left';
       g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;g.fillText(trunc(sub,maxW-bw+10,g.font),tx,c.y+c.h/2+9);}
     else g.fillText(trunc(sub,maxW+8,g.font),tx,c.y+c.h/2+9);
@@ -971,14 +989,14 @@ function drawMap(){
   else{g.beginPath();g.arc(H.x,H.y,H.r+10,0,7);g.setLineDash([5,5]);g.strokeStyle='rgba(255,92,99,.55)';g.lineWidth=2;g.stroke();g.setLineDash([]);}
   g.beginPath();g.arc(H.x,H.y,H.r,0,7);g.fillStyle='#122238';g.fill();g.lineWidth=selNode===H?3:2.4;g.strokeStyle=C.cyan;g.stroke();
   g.font=`${H.r*.9}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText('🖥️',H.x,H.y+1);
-  g.font='700 12.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink;g.fillText(S.host?.name||'server',H.x,H.y+H.r+24);
-  g.font='600 9.5px -apple-system,system-ui,sans-serif';g.fillStyle=fwOn?C.ok:C.crit;g.fillText(fwOn?'FIREWALL ON':'FIREWALL OFF',H.x,H.y+H.r+38);
+  const lx=M.narrow?H.x+H.r+18:H.x,ly=M.narrow?H.y-8:H.y+H.r+24;g.textAlign=M.narrow?'left':'center';
+  g.font='700 12.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink;g.fillText(S.host?.name||'server',lx,ly);
+  g.font='600 9.5px -apple-system,system-ui,sans-serif';g.fillStyle=fwOn?C.ok:C.crit;g.fillText(fwOn?'FIREWALL ON':'FIREWALL OFF',lx,ly+15);g.textAlign='center';
 }
 function spawn(){
   if(!M)return;const H=M.hub,lan={};(S.net?.peers||[]).forEach(p=>{if(p.lan)lan[p.ip]=(lan[p.ip]||0)+1;});
-  M.cards.forEach(c=>{const n=lan[c.d.ip];if(!n)return;if(Math.random()<.012*Math.min(n,4)){const pts=sampleQ(curve(c));particles.push({pts:Math.random()<.5?pts:pts.slice().reverse(),t:0,spd:rnd(.01,.018),col:C.violet,r:2.3});}});
-  const R=M.router, toHub=R?sampleQ(curve(R)).slice().reverse():[[H.x,H.y-H.r-10]];
-  const hubToRouter=R?sampleQ(curve(R)):[[H.x,H.y-H.r-10]];
+  M.cards.forEach(c=>{const n=lan[c.d.ip];if(!n||c===M.router)return;if(Math.random()<.012*Math.min(n,4)){const pts=linkPts(c);particles.push({pts:Math.random()<.5?pts:pts.slice().reverse(),t:0,spd:rnd(.01,.018),col:C.violet,r:2.3});}});
+  const R=M.router, hubToRouter=R?linkPts(R):[[H.x,H.y-H.r-10]], toHub=hubToRouter.slice().reverse();
   M.pills.forEach(p=>{
     if(p.kind==='peer'){if(Math.random()<.01*Math.min(p.conns,4)){const pts=[...hubToRouter,...pillToRouter(p).slice().reverse()];particles.push({pts:p.dir==='in'?pts.slice().reverse():pts,t:0,spd:rnd(.005,.009),col:C.cyan,r:2.2});}}
     else if(p.kind==='hostile'||p.kind==='blocked'){if(Math.random()<(p.active?.04:.006)){const pts=p.atRouter&&M.router?pillToRouter(p):[...pillToRouter(p),...toHub];
