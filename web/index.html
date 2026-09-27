@@ -1010,7 +1010,10 @@ function drawMap(){
   if(fwOn){g.beginPath();g.arc(H.x,H.y,H.r+10,0,7);g.strokeStyle='rgba(63,209,142,.6)';g.lineWidth=2.4;g.stroke();}
   else{g.beginPath();g.arc(H.x,H.y,H.r+10,0,7);g.setLineDash([5,5]);g.strokeStyle='rgba(255,92,99,.55)';g.lineWidth=2;g.stroke();g.setLineDash([]);}
   g.beginPath();g.arc(H.x,H.y,H.r,0,7);g.fillStyle='#122238';g.fill();g.lineWidth=selNode===H?3:2.4;g.strokeStyle=C.cyan;g.stroke();
-  g.font=`${H.r*.9}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText('🖥️',H.x,H.y+1);
+  // server icon drawn as lines so it sits exactly in the middle on every phone and PC
+  {const k=H.r/30,w=26*k,h=17*k,x0=H.x-w/2,y0=H.y-h/2-3.5*k;g.lineWidth=Math.max(1.6,2.2*k);g.strokeStyle=C.cyan;g.lineJoin='round';g.lineCap='round';
+   rr(g,x0,y0,w,h,3*k);g.stroke();g.beginPath();g.moveTo(H.x,y0+h);g.lineTo(H.x,y0+h+5*k);g.moveTo(H.x-7*k,y0+h+5.5*k);g.lineTo(H.x+7*k,y0+h+5.5*k);g.stroke();
+   g.beginPath();g.arc(x0+w-5*k,y0+h-4.5*k,1.6*k,0,7);g.fillStyle=C.ok;g.fill();g.lineCap='butt';}
   const lx=M.narrow?H.x+H.r+18:H.x,ly=M.narrow?H.y-8:H.y+H.r+24;g.textAlign=M.narrow?'left':'center';
   g.font='700 12.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink;g.fillText(S.host?.name||'server',lx,ly);
   g.font='600 9.5px -apple-system,system-ui,sans-serif';g.fillStyle=fwOn?C.ok:C.crit;g.fillText(fwOn?'FIREWALL ON':'FIREWALL OFF',lx,ly+15);g.textAlign='center';
