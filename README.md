@@ -1,1 +1,1 @@
-# homelab-soc-dashboard
+# Homelab-Soc-Dashboard
