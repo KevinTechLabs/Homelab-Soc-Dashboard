@@ -1,7 +1,7 @@
 {
   "name": "sentinel",
   "productName": "Sentinel",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Homelab SOC dashboard and network threat monitor (Sentinel)",
   "main": "main.js",
   "author": "Kevin Marcotte",

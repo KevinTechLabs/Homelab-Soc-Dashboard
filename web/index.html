@@ -894,17 +894,17 @@ function buildMap(){
   if(narrow){
     // phone: internet -> router -> server, then one box per zone with its devices in a two-column grid
     const gw=ring.find(d=>d.gateway),rest=ring.filter(d=>!d.gateway);
-    let y0=bandBottom+12;const rw=Math.min(230,mw-2*pad),rh=48;
+    let y0=bandBottom+12;const rw=Math.min(250,mw-2*pad),rh=52;
     if(gw){cards.push({d:gw,x:(mw-rw)/2,y:y0,w:rw,h:rh});y0+=rh+30;}
     hub={x:mw/2,y:y0+24,r:24,d:self};y0=hub.y+hub.r+30;
     const groups=[];rest.forEach(d=>{const k=mz?(d.zone||'Other'):'Home network';let g=groups.find(x=>x.name===k);if(!g)groups.push(g={name:k,devs:[]});g.devs.push(d);});
     if(mz)groups.sort((a,b)=>zoneRank(a.devs[0])-zoneRank(b.devs[0]));
-    const bx=pad,bw=mw-2*pad,ip=10,gap=8,head=30,zc=(bw-2*ip-gap)/2,zh=46;
+    const bx=pad,bw=mw-2*pad,head=38,zh=44;
     groups.forEach(g=>{g.devs.sort((a,b)=>(b.online-a.online)||order(a)-order(b)||devLabel(a).localeCompare(devLabel(b)));
-      const rows=Math.ceil(g.devs.length/2),h=head+rows*(zh+gap)+ip-gap+2;const z={name:g.name,x:bx,y:y0,w:bw,h,n:g.devs.length,on:g.devs.filter(d=>d.online).length};zones.push(z);
-      g.devs.forEach((d,i)=>cards.push({d,zone:z,x:bx+ip+(i%2)*(zc+gap),y:y0+head+Math.floor(i/2)*(zh+gap),w:zc,h:zh}));
-      y0+=h+22;});
-    need=Math.round(y0-22+pad+4);
+      const h=head+g.devs.length*zh+6;const z={name:g.name,x:bx,y:y0,w:bw,h,n:g.devs.length,on:g.devs.filter(d=>d.online).length};zones.push(z);
+      g.devs.forEach((d,i)=>cards.push({d,zone:z,row:true,x:bx,y:y0+head+i*zh,w:bw,h:zh}));
+      y0+=h+26;});
+    need=Math.round(y0-26+pad+4);
   } else {
   for(let tries=0;tries<80;tries++){
     const cy0=bandBottom+ch/2+14+ry;
@@ -929,7 +929,7 @@ function linkPts(c){const H=M.hub;
   if(!M.narrow)return sampleQ(curve(c));
   if(c===M.router)return [[H.x,H.y-H.r-10],[c.x+c.w/2,c.y+c.h]];
   const z=c.zone;if(!z)return sampleQ(curve(c));
-  return [[H.x,H.y+H.r+10],[H.x,z.y],[H.x,z.y+14],[c.x+c.w/2,z.y+14],[c.x+c.w/2,c.y+c.h/2]];}
+  return [[H.x,H.y+H.r+10],[H.x,z.y],[z.x+6,z.y+6],[z.x+6,c.y+c.h/2],[z.x+16,c.y+c.h/2]];}
 const qAt=(q,t)=>[(1-t)*(1-t)*q[0][0]+2*(1-t)*t*q[1][0]+t*t*q[2][0],(1-t)*(1-t)*q[0][1]+2*(1-t)*t*q[1][1]+t*t*q[2][1]];
 function pillToRouter(p){const R=M.router;const tx=R?R.x+R.w/2:M.hub.x,ty=R?R.y:M.hub.y-M.hub.r;return [[p.x+p.w/2,p.y+p.h],[p.x+p.w/2,M.bandBottom-8],[tx,M.bandBottom-8],[tx,ty]];}
 function polyAt(pts,t){let L=0;const seg=[];for(let i=1;i<pts.length;i++){const l=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);seg.push(l);L+=l;}let d=t*L;for(let i=0;i<seg.length;i++){if(d<=seg[i]||i===seg.length-1){const k=seg[i]?d/seg[i]:0;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*k,pts[i][1]+(pts[i+1][1]-pts[i][1])*k];}d-=seg[i];}return pts[pts.length-1];}
@@ -952,8 +952,8 @@ function drawMap(){
     if(last){g.beginPath();g.moveTo(H.x,H.y+H.r+10);g.lineTo(H.x,last.y);g.strokeStyle=C.line;g.lineWidth=1.6;g.stroke();}
     M.zones.forEach(z=>{rr(g,z.x,z.y,z.w,z.h,14);g.fillStyle='rgba(12,22,36,.92)';g.fill();g.strokeStyle=C.line;g.lineWidth=1.2;g.stroke();
       g.beginPath();g.arc(H.x,z.y,3.5,0,7);g.fillStyle=C.cyan;g.fill();
-      g.font='700 10.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink2;g.textAlign='left';g.textBaseline='middle';g.fillText(z.name.toUpperCase(),z.x+12,z.y+16);
-      g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;g.textAlign='right';g.fillText(`${z.on}/${z.n} online`,z.x+z.w-12,z.y+16);});
+      g.font='700 11px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink2;g.textAlign='left';g.textBaseline='middle';g.fillText(z.name.toUpperCase(),z.x+14,z.y+20);
+      g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;g.textAlign='right';g.fillText(`${z.on}/${z.n} online`,z.x+z.w-14,z.y+20);});
   } else
   // hub-to-card curves
   M.cards.forEach(c=>{const q=curve(c),talk=lanPeers.has(c.d.ip)||(c===M.router&&(S.net?.peers||[]).some(p=>!p.lan));
@@ -971,12 +971,27 @@ function drawMap(){
   const pfOn=S.pfsense&&S.pfsense.lastLog&&((S.now||Date.now())-S.pfsense.lastLog<15*60000);
   if(pfOn&&M.router){const R=M.router;rr(g,R.x-5,R.y-5,R.w+10,R.h+10,14);g.strokeStyle='rgba(63,209,142,.55)';g.lineWidth=2;g.stroke();}
   // cards
-  M.cards.forEach(c=>{const d=c.d,w=worst(d),sel=selNode===c;g.globalAlpha=d.online?1:.45;
+  M.cards.forEach(c=>{if(!c.row)return;const d=c.d,w=worst(d),sel=selNode===c,z=c.zone,first=c.y===z.y+38;
+    g.globalAlpha=d.online?1:.5;
+    if(sel){rr(g,c.x+4,c.y+2,c.w-8,c.h-4,9);g.fillStyle='rgba(69,198,230,.10)';g.fill();g.strokeStyle=C.cyan;g.lineWidth=1.5;g.stroke();}
+    else if(!first){g.beginPath();g.moveTo(c.x+14,c.y);g.lineTo(c.x+c.w-14,c.y);g.strokeStyle='rgba(120,150,190,.12)';g.lineWidth=1;g.stroke();}
+    if(w<=1){g.fillStyle=w===0?C.crit:C.high;rr(g,c.x+1,c.y+9,3,c.h-18,2);g.fill();}
+    const cy=c.y+c.h/2;
+    g.beginPath();g.arc(c.x+16,cy,3.6,0,7);g.fillStyle=d.online?C.ok:C.ink3;g.fill();
+    g.font='17px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(devIcon(d),c.x+38,cy+1);
+    const right=d.online?d.ip:'offline · '+ago(d.last);g.font='11px "IBM Plex Mono",monospace';const rw=textW(right,g.font);
+    g.textAlign='right';g.fillStyle=C.ink3;g.fillText(right,c.x+c.w-14,cy);
+    const badge=w===0?['RISK',C.crit]:w===1?['RISK',C.high]:needsReview(d)?['NEW',C.cyan]:null;
+    const tx=c.x+56;let maxW=c.x+c.w-14-rw-12-tx;const bw=badge?textW(badge[0],'700 9px -apple-system,system-ui,sans-serif')+10:0;if(badge)maxW-=bw+6;
+    g.textAlign='left';g.font='600 13.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink;const nm=trunc(devLabel(d),maxW,g.font);g.fillText(nm,tx,cy);
+    if(badge){const bx=tx+textW(nm,g.font)+6;rr(g,bx,cy-7,bw,14,4);g.fillStyle=badge[1]+'2e';g.fill();g.font='700 9px -apple-system,system-ui,sans-serif';g.fillStyle=badge[1];g.textAlign='center';g.fillText(badge[0],bx+bw/2,cy+.5);}
+    g.globalAlpha=1;});
+  M.cards.forEach(c=>{if(c.row)return;const d=c.d,w=worst(d),sel=selNode===c;g.globalAlpha=d.online?1:.45;
     rr(g,c.x,c.y,c.w,c.h,11);g.fillStyle=C.panel2;g.fill();
     g.lineWidth=sel?2.2:1.2;g.strokeStyle=sel?C.cyan:w===0?'rgba(255,92,99,.75)':w===1?'rgba(255,140,66,.65)':needsReview(d)?'rgba(69,198,230,.55)':C.line;g.stroke();
-    const ix=c.x+(M.narrow?18:22),iy=c.y+c.h/2;g.font=`${M.narrow?16:19}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(devIcon(d),ix,iy+1);
+    const ix=c.x+(M.narrow?22:22),iy=c.y+c.h/2;g.font=`${M.narrow?18:19}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(devIcon(d),ix,iy+1);
     g.beginPath();g.arc(c.x+c.w-11,c.y+11,3.8,0,7);g.fillStyle=d.online?C.ok:C.ink3;g.fill();
-    const tx=c.x+(M.narrow?34:42),maxW=c.x+c.w-tx-16;
+    const tx=c.x+(M.narrow?44:42),maxW=c.x+c.w-tx-16;
     g.textAlign='left';g.font=`600 ${M.narrow?12.5:12.5}px -apple-system,system-ui,sans-serif`;g.fillStyle=C.ink;g.fillText(trunc(devLabel(d),maxW,g.font),tx,c.y+c.h/2-8);
     const badge=w===0?['RISK',C.crit]:w===1?['RISK',C.high]:needsReview(d)?['NEW',C.cyan]:null;
     g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;let sub=(M.mz&&d.zone&&!d.gateway&&!M.narrow?d.zone+' · ':'')+(d.online?d.ip:'offline · '+ago(d.last));
