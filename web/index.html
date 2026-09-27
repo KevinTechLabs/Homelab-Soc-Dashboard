@@ -594,7 +594,7 @@ let pending=null;
 async function act(path,body){
   if(MODE==='demo'){const res=Demo.apply(path,body);S=Demo.snap();renderAll();toast(res.message||res.error);return;}
   const key=store.get('sentinel-key')||'';
-  if(!key){pending=[path,body];openKey();return;}
+  if(!key&&path!=='alert'){pending=[path,body];openKey();return;}
   try{
     const r=await fetchT('api/'+path,10000,{method:'POST',headers:{'Content-Type':'application/json','X-Sentinel-Key':key},body:JSON.stringify(body)});
     const j=await r.json().catch(()=>({}));

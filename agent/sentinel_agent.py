@@ -37,7 +37,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -2125,9 +2125,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, f.read(), MIME.get(os.path.splitext(full)[1], "application/octet-stream"))
         self._send(404, {"error": "Not found"})
 
+    # Actions that only change how alerts are shown don't need the access key;
+    # anything that changes the firewall, notifications or the router does.
+    KEYLESS = {"/api/alert"}
+
     def do_POST(self):
         key = self.headers.get("X-Sentinel-Key", "")
-        if not hmac.compare_digest(key.encode(), TOKEN.encode()):
+        if self.path.split("?")[0] not in self.KEYLESS and not hmac.compare_digest(key.encode(), TOKEN.encode()):
             return self._send(401, {"error": "Enter the access key shown when you installed Sentinel."})
         try:
             n = int(self.headers.get("Content-Length", "0"))

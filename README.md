@@ -86,7 +86,7 @@ The installer:
 - allows the router to send logs to UDP 5140
 - prints the dashboard address and your **access key**
 
-Open `http://SERVER-IP:8088` from your PC or phone. The access key is needed the first time you take an action, like blocking an address; to see it again, run `sudo cat /etc/sentinel/token`.
+Open `http://SERVER-IP:8088` from your PC or phone. Managing alerts (acknowledge, escalate, close) needs no key. Actions that change something, like blocking an address, notifications or the pfSense link, ask for the access key once per browser; to see it again, run `sudo cat /etc/sentinel/token`.
 
 Re-run the installer to update. To remove Sentinel, run `sudo ./install-server.sh --uninstall`.
 
