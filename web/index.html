@@ -1,0 +1,1228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A111C">
+<meta name="description" content="Sentinel cyber command center: SOC dashboard and network threat monitor.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sentinel">
+<title>Sentinel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#0A111C;
+  --panel:#101A28;
+  --panel-2:#16223A;
+  --line:#23324A;
+  --line-soft:#1A2638;
+  --ink:#E6ECF5;
+  --ink-2:#A3B0C4;
+  --ink-3:#6B7A90;
+  --cyan:#45C6E6;
+  --cyan-bg:rgba(69,198,230,.13);
+  --violet:#A98BFA;
+  --crit:#FF5C63;
+  --high:#FF8C42;
+  --med:#E9C84A;
+  --low:#8AA7C7;
+  --ok:#3FD18E;
+  --crit-bg:rgba(255,92,99,.14);
+  --high-bg:rgba(255,140,66,.16);
+  --med-bg:rgba(233,200,74,.13);
+  --low-bg:rgba(138,167,199,.13);
+  --ok-bg:rgba(63,209,142,.13);
+  --sans:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  --num:"Space Grotesk", -apple-system, system-ui, sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --nav-h:74px;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--ground)}
+body{margin:0}
+body{color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:0 calc(var(--nav-h) + 28px + env(safe-area-inset-bottom,0px));-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ---------- header ---------- */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:10;background:var(--ground);border-bottom:1px solid var(--line);margin-inline:-16px;padding:14px 16px}
+.top-in{max-width:1180px;margin:0 auto;width:100%;display:flex;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:12px;margin-right:auto;min-width:0;flex:1 1 auto;overflow:hidden}
+.brand svg{flex:none}
+.brand h1{margin:0;font-size:21px;font-weight:600;letter-spacing:.14em;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:clip}
+.pill{flex:none;display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap}
+.live{flex:none;display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:14px;font-weight:500;white-space:nowrap;max-width:46vw}
+.live span:last-child{overflow:hidden;text-overflow:ellipsis}
+.live .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none}
+.live.demo .dot{background:var(--med)}
+.live.lost .dot{background:var(--crit)}
+.live[aria-pressed="true"] .dot{background:var(--ink-3)}
+.clock{font-family:var(--mono);font-size:12.5px;color:var(--ink-3);white-space:nowrap}
+
+/* ---------- views ---------- */
+.view{display:grid;gap:14px;padding-top:18px}
+.view-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.view-h h2{margin:0;font-size:22px;font-weight:600}
+.view-h .meta{color:var(--ink-3);font-size:13px}
+.banner{display:flex;gap:12px;align-items:flex-start;background:var(--med-bg);border:1px solid rgba(233,200,74,.3);border-radius:12px;padding:12px 14px;font-size:14px;color:var(--ink)}
+.banner b{color:var(--med)}
+.banner.lost{background:var(--crit-bg);border-color:rgba(255,92,99,.35)}
+.banner.lost b{color:var(--crit)}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}
+.ch{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:18px 18px 0}
+.ch h3{margin:0;font-size:15px;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
+.ch .meta{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+.cb{padding:16px 18px 18px}
+
+/* KPI */
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
+.kpis .wide{grid-column:1 / -1}
+.kpi{padding:18px 18px 16px;display:grid;gap:4px;align-content:start}
+.kpi .lbl{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2)}
+.kpi .val{font-family:var(--num);font-size:40px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .val small{font-size:17px;font-weight:500;color:var(--ink-2);margin-left:4px}
+.kpi .sub{font-size:14px;color:var(--ink-2)}
+@media (min-width:900px){ .kpis{grid-template-columns:repeat(5,minmax(0,1fr))} .kpis .wide{grid-column:auto} }
+
+.two{display:grid;gap:14px;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)}
+@media (max-width:900px){ .two{grid-template-columns:minmax(0,1fr)} }
+.stack{display:grid;gap:14px;align-content:start;min-width:0}
+
+/* chart */
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;color:var(--ink-2);padding:10px 18px 0}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:2px;margin-right:8px;vertical-align:middle}
+.legend b{font-family:var(--num);color:var(--ink);font-weight:600;margin-left:4px}
+.chartbox{position:relative;height:230px;margin:6px 10px 12px}
+.chartbox canvas{position:absolute;inset:0;width:100%;height:100%}
+
+/* severity + tags */
+.sev{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:3px 8px;border-radius:6px;white-space:nowrap}
+.sev.critical{color:var(--crit);background:var(--crit-bg)}
+.sev.high{color:var(--high);background:var(--high-bg)}
+.sev.medium{color:var(--med);background:var(--med-bg)}
+.sev.low{color:var(--low);background:var(--low-bg)}
+.tag{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:5px;background:var(--panel-2);color:var(--ink-2);border:1px solid var(--line)}
+.tag.ok{color:var(--ok);background:var(--ok-bg);border-color:transparent}
+.tag.zone{color:var(--violet,#a98bfa);border-color:rgba(169,139,250,.35);background:transparent;text-transform:none;letter-spacing:0}
+.tag.bad{color:var(--crit);background:var(--crit-bg);border-color:transparent}
+.st{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.st.new{color:var(--cyan)} .st.escalated{color:var(--crit)} .st.closed{color:var(--ink-3)}
+
+/* attention list */
+.att{display:grid;padding-top:8px}
+.att button{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;text-align:left;background:none;border:0;border-top:1px solid var(--line-soft);padding:12px 18px}
+.att button:first-child{border-top:0}
+.att button:hover{background:var(--panel-2)}
+.att .t{font-weight:500}
+.att .s{font-size:12.5px;color:var(--ink-3);font-family:var(--mono)}
+.att .go{color:var(--ink-3);font-size:18px}
+.empty{color:var(--ink-3);font-size:14px;margin:0}
+
+/* ATT&CK */
+.attack{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
+.tac{border-radius:10px;padding:10px;border:1px solid var(--line-soft);display:grid;gap:2px;min-height:62px}
+.tac .n{font-size:12px;color:var(--ink-2);line-height:1.25}
+.tac .c{font-family:var(--num);font-size:20px;font-weight:600}
+
+/* server card */
+.srv{display:grid;gap:14px}
+.srv-h{display:grid;gap:2px}
+.srv-h b{font-size:17px;font-weight:600}
+.srv-h span{color:var(--ink-3);font-size:13px}
+.meter{display:grid;grid-template-columns:70px 1fr 88px;gap:12px;align-items:center;font-size:13.5px}
+.meter .track{display:block;height:8px;background:var(--line-soft);border-radius:4px;overflow:hidden}
+.meter .fill{display:block;height:100%;border-radius:4px;transition:width .6s ease}
+.meter .v{font-family:var(--num);text-align:right;color:var(--ink-2);font-size:13px}
+.srv-foot{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-3)}
+.srv-foot b{color:var(--ink-2);font-family:var(--num);font-weight:500}
+
+/* filters */
+.filters{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+.chip{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13.5px;color:var(--ink-2);white-space:nowrap}
+.chip[aria-pressed="true"]{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-bg)}
+.chip b{font-family:var(--num);font-weight:600;margin-left:4px}
+
+/* alert list */
+.alist{display:grid;gap:10px}
+.al{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.al.open{border-color:#34507A}
+.al.fresh{animation:flash 1.6s ease-out}
+@keyframes flash{from{box-shadow:0 0 0 2px var(--cyan)}to{box-shadow:0 0 0 0 transparent}}
+.al-head{display:grid;grid-template-columns:1fr auto;gap:6px 12px;width:100%;text-align:left;background:none;border:0;padding:14px 16px}
+.al-head .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.al-head .t{font-weight:600;font-size:15.5px;grid-column:1}
+.al-head .s{font-family:var(--mono);font-size:12px;color:var(--ink-3);grid-column:1;word-break:break-all}
+.al-head .side{grid-column:2;grid-row:1 / span 3;display:grid;justify-items:end;align-content:start;gap:4px}
+.al-head .tm{font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}
+.al-head .cnt{font-family:var(--num);font-size:12.5px;color:var(--ink-2)}
+.al.is-closed .al-head{opacity:.55}
+.al-body{border-top:1px solid var(--line-soft);padding:14px 16px 16px;display:grid;gap:14px}
+.al-body p{margin:0;color:var(--ink-2);font-size:14px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13.5px;margin:0}
+.kv dt{color:var(--ink-3);font-size:12px;letter-spacing:.1em;text-transform:uppercase;padding-top:2px}
+.kv dd{margin:0;font-family:var(--mono);font-size:13px;word-break:break-word}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--panel-2);border-radius:10px;padding:9px 14px;font-size:14px;font-weight:500}
+.btn:hover{border-color:var(--ink-3)}
+.btn.primary{background:var(--cyan);border-color:var(--cyan);color:#06222B}
+.btn.danger{color:var(--crit);border-color:rgba(255,92,99,.4);background:transparent}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.timeline{list-style:none;margin:0;padding:0;display:grid;gap:8px;font-size:13.5px}
+.timeline li{display:grid;grid-template-columns:66px 1fr;gap:10px;color:var(--ink-2)}
+.timeline li span:first-child{font-family:var(--mono);color:var(--ink-3);font-size:12.5px}
+
+/* network */
+.mapbox{position:relative;height:420px;margin:10px 0 0;transition:height .2s}
+.mapbox canvas{position:absolute;inset:0;width:100%;height:100%;cursor:pointer}
+.maplegend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--ink-2);padding:12px 18px 16px;border-top:1px solid var(--line-soft)}
+.maplegend span{display:inline-flex;align-items:center;gap:7px}
+.maplegend i{width:9px;height:9px;border-radius:50%}
+.node-info{position:absolute;left:12px;bottom:12px;max-width:min(330px,calc(100% - 24px));background:rgba(22,34,58,.97);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:13.5px;display:grid;gap:6px}
+.node-info b{font-weight:600;font-family:var(--mono)}
+.node-info .x{position:absolute;top:4px;right:6px;background:none;border:0;color:var(--ink-3);font-size:18px;line-height:1;padding:6px}
+.node-info .btn{justify-self:start;padding:6px 12px;font-size:13px}
+
+.feed{font-family:var(--mono);font-size:12px;height:420px;overflow:auto;margin-top:12px;border-top:1px solid var(--line-soft)}
+.feed .row{display:grid;grid-template-columns:62px 52px 1fr;gap:8px;padding:6px 18px;border-bottom:1px solid var(--line-soft)}
+.feed .tm{color:var(--ink-3)}
+.feed .ac{font-weight:500}
+.feed .ac.ALLOW{color:var(--ok)} .feed .ac.DROP{color:var(--crit)} .feed .ac.ALERT{color:var(--high)} .feed .ac.FAIL{color:var(--high)} .feed .ac.INFO{color:var(--ink-3)}
+.feed .d{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.feed .row.hot{background:rgba(255,140,66,.07)}
+.feed .empty{padding:14px 18px}
+
+.bars{display:grid;gap:12px}
+.bar{display:grid;grid-template-columns:78px 1fr 40px;gap:12px;align-items:center;font-size:13.5px}
+.bar .track{display:block;height:8px;background:var(--line-soft);border-radius:4px;overflow:hidden}
+.bar .fill{display:block;height:100%;border-radius:4px;transition:width .6s ease}
+.bar .v{font-family:var(--num);text-align:right;color:var(--ink-2)}
+.bar .k{font-family:var(--mono);font-size:12.5px}
+
+.rows{display:grid}
+.rw{display:grid;grid-template-columns:auto 1fr auto;gap:4px 12px;align-items:center;padding:11px 18px;border-top:1px solid var(--line-soft)}
+.rw:first-child{border-top:0}
+.rw .hd{width:10px;height:10px;border-radius:50%}
+.rw .nm{font-weight:500;min-width:0}
+.rw .nm small{display:block;font-weight:400;color:var(--ink-3);font-size:12.5px}
+.rw .port{font-family:var(--num);font-weight:600;font-size:16px;min-width:52px}
+.ck{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700}
+.ck.ok{background:var(--ok-bg);color:var(--ok)} .ck.bad{background:var(--crit-bg);color:var(--crit)}
+
+.blocklist{display:grid;gap:8px}
+.bl{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:12px 14px;border:1px solid var(--line-soft);border-radius:12px;font-size:14px}
+.bl .ip{font-family:var(--mono);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bl .why{grid-column:1;color:var(--ink-3);font-size:12.5px}
+.bl .btn{grid-row:1 / span 2;grid-column:2;padding:7px 12px;font-size:13px}
+.bl.blocked .ip{color:var(--ok)}
+.note{font-size:13px;color:var(--ink-3);margin:10px 0 0}
+.rule{display:flex;align-items:center;gap:12px;font-size:14.5px}
+.rule .rn{flex:1;min-width:0}
+.rule .rn small{display:block;color:var(--ink-3);font-size:12.5px}
+.sw{position:relative;width:48px;height:28px;flex:none;border-radius:14px;background:var(--line);border:0;padding:0}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--ink-2);transition:transform .2s}
+.sw[aria-checked="true"]{background:var(--ok)}
+.sw[aria-checked="true"]::after{transform:translateX(20px);background:#fff}
+
+.seg{display:flex;gap:4px;background:var(--ground);border:1px solid var(--line);border-radius:10px;padding:3px;flex-wrap:wrap}
+.seg button{flex:1;background:none;border:0;border-radius:7px;padding:7px 10px;font-size:13px;color:var(--ink-2);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--cyan-bg);color:var(--cyan)}
+.seg button:disabled{opacity:.4;cursor:not-allowed}
+.field{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px}
+.field select{font:inherit;background:var(--ground);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:7px 10px}
+.field .note{margin:0}
+.setup{display:grid;gap:8px;background:var(--ground);border:1px solid var(--line-soft);border-radius:12px;padding:12px 14px;font-size:13.5px;color:var(--ink-2)}
+.setup ol{margin:0;padding-left:20px;display:grid;gap:6px}
+.topic{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.topic code{font-family:var(--mono);font-size:13px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;word-break:break-all}
+.topic .btn{padding:5px 10px;font-size:12.5px}
+.divider{height:1px;background:var(--line-soft)}
+
+/* devices */
+.kpis.four{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (min-width:900px){ .kpis.four{grid-template-columns:repeat(4,minmax(0,1fr))} }
+.ddot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.dv .al-head .t{display:flex;align-items:center;gap:8px}
+.dv .al-head .s{word-break:normal;overflow-wrap:anywhere}
+.ports{display:flex;gap:6px;flex-wrap:wrap}
+.ports span{font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--panel-2);border:1px solid var(--line);color:var(--ink-2)}
+.fnd{display:grid;gap:10px;list-style:none;margin:0;padding:0}
+.fnd li{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13.5px;align-items:start}
+.fnd li p{grid-column:2;margin:0;color:var(--ink-2);font-size:13px}
+.rename{display:flex;gap:8px;flex-wrap:wrap}
+.rename input{flex:1;min-width:0;font:inherit;background:var(--ground);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.geo{color:var(--ink-2)}
+
+/* bottom nav */
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:15;background:rgba(10,17,28,.97);border-top:1px solid var(--line);
+  padding:8px 8px calc(10px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(5,1fr)}
+.nav button{background:none;border:0;display:grid;justify-items:center;gap:4px;padding:6px 0;color:var(--ink-2);font-size:12.5px;position:relative;min-width:0}
+.nav button svg{width:26px;height:26px}
+.nav button[aria-selected="true"]{color:var(--cyan)}
+.nav .badge{position:absolute;top:0;left:calc(50% + 6px);min-width:22px;height:22px;border-radius:11px;background:var(--crit);color:#fff;font-size:12px;font-weight:600;display:grid;place-items:center;padding:0 6px}
+@media (min-width:900px){ .nav{left:50%;right:auto;transform:translateX(-50%);width:660px;bottom:14px;border:1px solid var(--line);border-radius:18px;padding-bottom:8px} }
+
+.toast{position:fixed;left:50%;bottom:calc(var(--nav-h) + 24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 16px;font-size:14px;z-index:30;box-shadow:0 8px 30px rgba(0,0,0,.45);max-width:calc(100% - 32px)}
+.modal{position:fixed;inset:0;z-index:40;background:rgba(4,8,14,.7);display:grid;place-items:center;padding:16px}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(420px,100%);display:grid;gap:12px}
+.modal-box h3{margin:0;font-size:18px}
+.modal-box p{margin:0;color:var(--ink-2);font-size:14px}
+.modal-box code{font-family:var(--mono);font-size:12.5px;background:var(--panel-2);padding:2px 6px;border-radius:5px;color:var(--ink)}
+.modal-box input{font:inherit;font-family:var(--mono);background:var(--ground);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+
+@media (max-width:560px){
+  .brand h1{font-size:17px;letter-spacing:.1em}
+  .brand{gap:8px}
+  .brand svg{width:26px;height:28px}
+  .pill{font-size:11.5px;padding:6px 10px;letter-spacing:.08em}
+  .live{padding:7px 10px;font-size:13.5px}
+  .top-in{gap:8px}
+  .clock{display:none}
+  .kpi .val{font-size:36px}
+}
+@media (max-width:430px){ .brand h1{font-size:15px;letter-spacing:.08em} .pill{font-size:10.5px;padding:5px 8px;letter-spacing:.06em} }
+@media (max-width:380px){ .brand h1{font-size:15px;letter-spacing:.06em} .pill{font-size:10.5px;padding:5px 8px} .live span:last-child{display:none} }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important;transition:none!important} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <svg width="30" height="32" viewBox="0 0 30 32" aria-hidden="true">
+        <path d="M15 2 27 6.5v8.2c0 7.6-5 13-12 15.3C8 27.7 3 22.3 3 14.7V6.5z" fill="none" stroke="#45C6E6" stroke-width="2.2" stroke-linejoin="round"/>
+        <circle cx="15" cy="14.5" r="4.6" fill="none" stroke="#45C6E6" stroke-width="2.2"/>
+        <path d="M15 19v4.5" stroke="#45C6E6" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <h1>SENTINEL</h1>
+    </div>
+    <span class="clock" id="clock"></span>
+    <span class="pill" id="threat">Threat · —</span>
+    <button class="live" id="pause" aria-pressed="false" title="Pause or resume updates"><span class="dot"></span><span id="pauseTxt">Connecting</span></button>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ============ OVERVIEW ============ -->
+  <section class="view" id="v-overview" role="tabpanel" aria-labelledby="nav-overview">
+    <div class="banner" id="demoBanner" hidden><div><b>Demo data.</b> Sentinel couldn't reach the agent on your server, so it's showing a simulation. On the server, run <span class="mono">sudo ./install-server.sh</span> from the Sentinel folder to see live activity.</div></div>
+    <div class="banner lost" id="lostBanner" hidden><div><b>Connection lost.</b> The server's Sentinel agent isn't answering. The last data received is shown. Check it on the server with <span class="mono">systemctl status sentinel-agent</span>.</div></div>
+    <div class="kpis">
+      <div class="card kpi wide"><span class="lbl">Open alerts</span><span class="val" id="k-open">0</span><span class="sub" id="k-open-sub"></span></div>
+      <div class="card kpi"><span class="lbl">Security events</span><span class="val" id="k-ev">0</span><span class="sub">last hour · logins, sudo, firewall</span></div>
+      <div class="card kpi"><span class="lbl">Stopped</span><span class="val" id="k-stop">0</span><span class="sub" id="k-stop-sub"></span></div>
+      <div class="card kpi"><span class="lbl">MTTA</span><span class="val" id="k-mtta">—</span><span class="sub">mean time to acknowledge</span></div>
+      <div class="card kpi"><span class="lbl">Services healthy</span><span class="val" id="k-svc">0</span><span class="sub" id="k-svc-sub"></span></div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <div class="ch"><h3>Network traffic</h3><span class="meta" id="trafficMeta">last 5 min</span></div>
+        <div class="legend"><span><i style="background:var(--cyan)"></i>Inbound <b id="l-in">0</b> <span id="l-unit">Mbps</span></span><span><i style="background:var(--violet)"></i>Outbound <b id="l-out">0</b> <span id="l-unit2">Mbps</span></span></div>
+        <div class="chartbox"><canvas id="traffic"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>Needs attention</h3><span class="meta">new critical &amp; high</span></div>
+        <div class="att" id="attention"></div>
+      </div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <div class="ch"><h3>MITRE ATT&amp;CK</h3><span class="meta">open alerts by tactic</span></div>
+        <div class="cb"><div class="attack" id="attack"></div></div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>Server</h3><span class="meta" id="srvMeta"></span></div>
+        <div class="cb"><div class="srv" id="server"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ALERTS ============ -->
+  <section class="view" id="v-alerts" role="tabpanel" aria-labelledby="nav-alerts" hidden>
+    <div class="view-h"><h2>Alerts</h2><span class="meta" id="qmeta"></span></div>
+    <div class="filters" id="sevFilter">
+      <button class="chip" data-f="open" aria-pressed="true">Open<b id="c-open"></b></button>
+      <button class="chip" data-f="critical" aria-pressed="false">Critical<b id="c-critical"></b></button>
+      <button class="chip" data-f="high" aria-pressed="false">High<b id="c-high"></b></button>
+      <button class="chip" data-f="medium" aria-pressed="false">Medium<b id="c-medium"></b></button>
+      <button class="chip" data-f="low" aria-pressed="false">Low<b id="c-low"></b></button>
+      <button class="chip" data-f="closed" aria-pressed="false">Closed</button>
+    </div>
+    <div class="alist" id="alist"></div>
+  </section>
+
+  <!-- ============ NETWORK ============ -->
+  <section class="view" id="v-network" role="tabpanel" aria-labelledby="nav-network" hidden>
+    <div class="view-h"><h2>Network</h2><span class="meta" id="netmeta"></span></div>
+    <div class="card">
+      <div class="ch"><h3>Network map</h3><span class="meta">Tap a device or address</span></div>
+      <div class="mapbox"><canvas id="map" aria-label="Map of live connections to this server"></canvas><div class="node-info" id="nodeInfo" hidden></div></div>
+      <div class="maplegend">
+        <span><i style="background:var(--cyan)"></i>Internet traffic</span>
+        <span><i style="background:var(--violet)"></i>Home device ↔ server</span>
+        <span><i style="background:var(--crit)"></i>Attacker</span>
+        <span><i style="background:var(--ok)"></i>Stopped by firewall (router or server)</span>
+        <span><i style="background:transparent;border:1.5px solid var(--cyan);border-radius:3px"></i>New device</span><span><i style="background:transparent;border:1.5px solid var(--crit);border-radius:3px"></i>At risk</span>
+      </div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <div class="ch"><h3>Security log</h3><span class="meta">logins · sudo · firewall</span></div>
+        <div class="feed" id="feed"></div>
+      </div>
+      <div class="stack">
+        <div class="card">
+          <div class="ch"><h3>Open ports</h3><span class="meta" id="portsMeta"></span></div>
+          <div class="rows" id="ports" style="padding-top:8px"></div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>Active connections</h3><span class="meta">by service</span></div>
+          <div class="cb"><div class="bars" id="proto"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DEVICES ============ -->
+  <section class="view" id="v-devices" role="tabpanel" aria-labelledby="nav-devices" hidden>
+    <div class="view-h"><h2>Devices</h2><span class="meta" id="devMeta"></span><button class="btn ghost" id="sweepNow" type="button" style="margin-left:auto;padding:6px 12px;font-size:13px">Scan network now</button></div>
+    <div class="kpis four">
+      <div class="card kpi"><span class="lbl">Online now</span><span class="val" id="d-on">0</span><span class="sub" id="d-on-sub"></span></div>
+      <div class="card kpi"><span class="lbl">Need review</span><span class="val" id="d-new">0</span><span class="sub">not marked as yours yet</span></div>
+      <div class="card kpi"><span class="lbl">At risk</span><span class="val" id="d-risk">0</span><span class="sub">risky services open</span></div>
+      <div class="card kpi"><span class="lbl">Tailscale</span><span class="val" id="d-ts">0</span><span class="sub" id="d-ts-sub"></span></div>
+    </div>
+    <div class="filters" id="devFilter">
+      <button class="chip" data-f="all" aria-pressed="true">All<b id="df-all"></b></button>
+      <button class="chip" data-f="review" aria-pressed="false">Needs review<b id="df-review"></b></button>
+      <button class="chip" data-f="risk" aria-pressed="false">At risk<b id="df-risk"></b></button>
+      <button class="chip" data-f="watch" aria-pressed="false">Watched<b id="df-watch"></b></button>
+      <button class="chip" data-f="offline" aria-pressed="false">Offline<b id="df-offline"></b></button>
+    </div>
+    <div class="filters" id="zoneFilter" hidden></div>
+    <div class="alist" id="devList"></div>
+    <div class="two">
+      <div class="card">
+        <div class="ch"><h3>Tailscale devices</h3><span class="meta" id="tsMeta"></span></div>
+        <div class="rows" id="tsList" style="padding-top:8px"></div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>How Sentinel checks</h3></div>
+        <div class="cb" style="display:grid;gap:14px">
+          <div class="rule"><div class="rn">Post new devices to Discord<small>Also posts when a watched device goes offline</small></div><button class="sw" role="switch" id="dNotify" aria-checked="true" aria-label="Post new devices to Discord"></button></div>
+          <p class="note" style="margin:0" id="lanNote"></p>
+          <p class="note" style="margin:0">Every 6 hours Sentinel knocks on about 25 common ports on each device to see which services are open. It never tries passwords or changes anything on your devices.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RESPOND ============ -->
+  <section class="view" id="v-respond" role="tabpanel" aria-labelledby="nav-respond" hidden>
+    <div class="view-h"><h2>Respond</h2><span class="meta">Block attackers and harden the server</span></div>
+    <div class="two">
+      <div class="stack">
+        <div class="card">
+          <div class="ch"><h3>Hostile sources</h3><span class="meta" id="srcMeta"></span></div>
+          <div class="cb"><div class="blocklist" id="blocklist"></div><p class="note" id="fwNote" hidden></p></div>
+        </div>
+        <div class="card" id="pfCard">
+          <div class="ch"><h3>pfSense router</h3><span class="meta" id="pfMeta"></span></div>
+          <div class="cb" style="display:grid;gap:16px">
+            <div style="display:grid;gap:10px">
+              <div class="rule"><span class="ck" id="pfLogIcon">!</span><div class="rn"><b style="font-weight:600">Router firewall log</b><small id="pfLogTxt"></small></div></div>
+              <div class="setup" id="pfLogSetup">
+                <b style="color:var(--ink);font-weight:600">Send pfSense's log to Sentinel</b>
+                <ol>
+                  <li>In pfSense, open <b style="color:var(--ink)">Status → System Logs → Settings</b>.</li>
+                  <li>Under <b style="color:var(--ink)">Remote Logging Options</b>, tick <b style="color:var(--ink)">Enable Remote Logging</b>. Set Source Address to <b style="color:var(--ink)">LAN</b> and IP Protocol to <b style="color:var(--ink)">IPv4</b>.</li>
+                  <li>In <b style="color:var(--ink)">Remote log servers</b>, enter:<div class="topic" style="margin-top:6px"><code id="pfSyslog">…</code><button class="btn" type="button" data-copy="pfSyslog">Copy</button></div></li>
+                  <li>Under <b style="color:var(--ink)">Remote Syslog Contents</b>, tick <b style="color:var(--ink)">Firewall Events</b> and <b style="color:var(--ink)">DHCP service events</b>, then <b style="color:var(--ink)">Save</b>.</li>
+                </ol>
+              </div>
+            </div>
+            <div class="divider"></div>
+            <div style="display:grid;gap:10px">
+              <div class="rule"><span class="ck" id="pfNbrIcon">!</span><div class="rn"><b style="font-weight:600">Devices in every zone</b><small id="pfNbrTxt"></small></div></div>
+              <div class="rule"><span class="ck" id="pfSshIcon">!</span><div class="rn"><b style="font-weight:600">Block for your whole network</b><small id="pfSshTxt"></small></div><button class="btn ghost" id="pfOff" type="button" style="padding:6px 12px;font-size:13px" hidden>Turn off</button></div>
+              <div class="setup" id="pfSshSetup">
+                <b style="color:var(--ink);font-weight:600">Connect Sentinel to pfSense (router blocking and devices in every zone)</b>
+                <ol>
+                  <li>In pfSense, open <b style="color:var(--ink)">System → Advanced → Admin Access</b>. Under Secure Shell, tick <b style="color:var(--ink)">Enable Secure Shell</b> and set SSHd Key Only to <b style="color:var(--ink)">Public Key Only</b>. Save.</li>
+                  <li>Open <b style="color:var(--ink)">System → User Manager</b>, edit <b style="color:var(--ink)">admin</b>, and paste this into <b style="color:var(--ink)">Authorized SSH Keys</b>. Save.<div class="topic" style="margin-top:6px"><code id="pfKey" style="max-height:74px;overflow:auto">Tap “Make key” to create one</code><button class="btn" type="button" data-copy="pfKey">Copy</button><button class="btn" type="button" id="pfMakeKey">Make key</button></div></li>
+                  <li>Check the router address, then tap Connect.
+                    <form class="rename" id="pfForm" style="margin-top:6px"><label for="pfHost" style="position:absolute;left:-9999px">Router address</label><input id="pfHost" placeholder="10.20.1.1" autocomplete="off" style="max-width:150px"><label for="pfUser" style="position:absolute;left:-9999px">pfSense user</label><input id="pfUser" placeholder="admin" autocomplete="off" style="max-width:110px"><button class="btn primary" type="submit">Connect</button></form></li>
+                </ol>
+              </div>
+              <p class="note" style="margin:0">Blocks go through pfSense's own <span class="mono">easyrule</span> command, so you can see and remove them under Firewall → Rules → WAN. This gives this server a key to your router's firewall; if it were ever hacked, the router could be changed too. Leave it off if that's a concern. The log view above works either way.</p>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>Automatic response</h3></div>
+          <div class="cb"><div class="rule"><div class="rn">Auto-block attackers<small>Blocks internet addresses that brute-force SSH, spray passwords or scan ports. Never blocks addresses on your home network.</small></div><button class="sw" role="switch" id="autoblock" aria-checked="false" aria-label="Auto-block attackers"></button></div></div>
+        </div>
+        <div class="card" id="notifyCard">
+          <div class="ch"><h3>Discord notifications</h3><span class="meta" id="nMeta"></span></div>
+          <div class="cb" style="display:grid;gap:14px">
+            <div class="setup" id="nSetup">
+              <b style="color:var(--ink);font-weight:600">Connect a Discord channel</b>
+              <ol>
+                <li>In Discord, open your server's <b style="color:var(--ink)">Server Settings → Integrations → Webhooks</b>.</li>
+                <li>Tap <b style="color:var(--ink)">New Webhook</b>, pick the channel for alerts, then <b style="color:var(--ink)">Copy Webhook URL</b>.</li>
+                <li>Paste it here and tap Connect.</li>
+              </ol>
+              <form class="topic" id="nForm" style="margin-top:4px"><label for="nHook" style="position:absolute;left:-9999px">Discord webhook link</label><input id="nHook" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://discord.com/api/webhooks/…" style="flex:1;min-width:0;font:inherit;font-family:var(--mono);font-size:12.5px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 10px"><button class="btn primary" type="submit">Connect</button></form>
+            </div>
+            <div class="rule" id="nConnected" hidden><div class="rn"><span id="nName"></span><small>Posts go to this Discord webhook's channel</small></div><button class="btn ghost" id="nRemove" type="button" style="padding:6px 12px;font-size:13px">Disconnect</button></div>
+            <div id="nControls" style="display:grid;gap:14px">
+              <div class="divider"></div>
+              <div class="rule"><div class="rn">Alerts<small>Posted the moment one fires. At most 6 every 5 minutes.</small></div><button class="sw" role="switch" id="nAlerts" aria-checked="false" aria-label="Alerts to Discord"></button></div>
+              <div class="seg" id="nSev" role="group" aria-label="Which alerts to send">
+                <button data-sev="high" aria-pressed="true">High and critical</button><button data-sev="critical" aria-pressed="false">Critical only</button>
+              </div>
+              <div class="divider"></div>
+              <div class="rule"><div class="rn">Daily summary<small>Alerts, failed logins, attackers, checks and services from the last 24 hours</small></div><button class="sw" role="switch" id="nSummary" aria-checked="false" aria-label="Daily summary to Discord"></button></div>
+              <div class="field"><label for="nHour">Post it at</label><select id="nHour"></select><span class="note" id="nTz"></span></div>
+              <div class="actions"><button class="btn primary" id="nTest" type="button">Send test message</button></div>
+            </div>
+            <p class="note" style="margin:0">A webhook link lets anyone post to that channel, so Sentinel keeps it on your server and never shows it here again.</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>Security checks</h3><span class="meta" id="checkMeta"></span></div>
+          <div class="rows" id="checks" style="padding-top:8px"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>Services</h3><span class="meta" id="svcMeta"></span></div>
+        <div class="rows" id="services" style="padding-top:8px"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="nav" role="tablist" aria-label="Sections">
+  <button role="tab" id="nav-overview" data-v="overview" aria-selected="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg>Overview</button>
+  <button role="tab" id="nav-alerts" data-v="alerts" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4.5" stroke-linecap="round"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg>Alerts<span class="badge" id="badge" hidden></span></button>
+  <button role="tab" id="nav-network" data-v="network" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="19" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M11 7 6 17M13 7l5 10M7.2 19h9.6"/></svg>Network</button>
+  <button role="tab" id="nav-devices" data-v="devices" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5 12 4l8.5 6.5V20h-17z"/><path d="M8.5 15a5 5 0 0 1 7 0"/><path d="M10.6 17.2a2 2 0 0 1 2.8 0"/></svg>Devices<span class="badge" id="dBadge" hidden></span></button>
+  <button role="tab" id="nav-respond" data-v="respond" aria-selected="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 19.5 6v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z"/><path d="m8.8 12 2.2 2.2 4.3-4.4" stroke-linecap="round"/></svg>Respond</button>
+</nav>
+
+<div class="modal" id="keyModal" hidden>
+  <form class="modal-box" id="keyForm">
+    <h3>Enter your access key</h3>
+    <p>Actions like blocking an address need the key shown when you installed Sentinel. To see it again, run <code>sudo cat /etc/sentinel/token</code> on the server.</p>
+    <label for="keyInput" class="sr" style="font-size:13px;color:var(--ink-3)">Access key</label>
+    <input id="keyInput" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="actions"><button class="btn primary" type="submit">Save key</button><button class="btn ghost" type="button" id="keyCancel">Cancel</button></div>
+  </form>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const rnd = (a,b) => Math.random()*(b-a)+a;
+const ri = (a,b) => Math.floor(rnd(a,b+1));
+const pick = a => a[Math.floor(Math.random()*a.length)];
+const pad = n => String(n).padStart(2,'0');
+const hhmmss = t => {const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;};
+const hhmm = t => {const d=new Date(t);return `${pad(d.getHours())}:${pad(d.getMinutes())}`;};
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = {cyan:css('--cyan'),violet:css('--violet'),crit:css('--crit'),high:css('--high'),med:css('--med'),low:css('--low'),ok:css('--ok'),ink:css('--ink'),ink2:css('--ink-2'),ink3:css('--ink-3'),line:css('--line'),soft:css('--line-soft'),panel:css('--panel'),panel2:css('--panel-2'),ground:css('--ground')};
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const SEVW={critical:0,high:1,medium:2,low:3};
+const TACTICS=['Initial Access','Execution','Persistence','Privilege Escalation','Defense Evasion','Credential Access','Discovery','Lateral Movement','Command and Control','Exfiltration','Impact'];
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+let S=null, MODE='connecting', paused=false, current='overview', failCount=0;
+function ago(t){const s=Math.max(0,(Date.now()-t)/1000);if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+' min ago';if(s<86400)return Math.floor(s/3600)+' h ago';return Math.floor(s/86400)+' d ago';}
+function bytes(n){if(!n&&n!==0)return '—';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<4){n/=1024;i++;}return (n>=10||i===0?Math.round(n):n.toFixed(1))+' '+u[i];}
+function dur(s){const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m`;}
+
+let tt; function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,3200);}
+
+/* ---------------- navigation ---------------- */
+const VIEWS=['overview','alerts','network','devices','respond'];
+function show(v,boot){
+  current=v;
+  VIEWS.forEach(x=>{$('#v-'+x).hidden=x!==v;$('#nav-'+x).setAttribute('aria-selected',x===v);});
+  if(v==='overview') sizeChart();
+  if(v==='network') sizeMap();
+  if(!boot){try{history.replaceState(null,'','#'+v);}catch(e){}}
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+function tick(){const d=new Date();$('#clock').textContent=`${hhmmss(d)} · ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}Z`;}
+tick(); setInterval(tick,1000);
+$('#pause').onclick=e=>{paused=!paused;e.currentTarget.setAttribute('aria-pressed',paused);renderConn();if(!paused&&MODE!=='demo')poll();};
+
+/* ================= DATA: live agent or demo ================= */
+async function fetchT(url,ms,opt={}){const c=new AbortController();const id=setTimeout(()=>c.abort(),ms);try{return await fetch(url,{...opt,signal:c.signal,cache:'no-store'});}finally{clearTimeout(id);}}
+async function probe(){
+  try{const r=await fetchT('api/state',2500);if(!r.ok)return false;const j=await r.json();if(j&&j.mode==='live'){S=j;return true;}}catch(e){}
+  return false;
+}
+async function poll(){
+  if(paused||MODE==='demo')return;
+  try{const r=await fetchT('api/state',6000);if(!r.ok)throw 0;S=await r.json();failCount=0;if(MODE!=='live'){MODE='live';}renderAll();}
+  catch(e){failCount++;if(failCount>=2&&MODE!=='lost'){MODE='lost';renderAll();}}
+}
+let pending=null;
+async function act(path,body){
+  if(MODE==='demo'){const res=Demo.apply(path,body);S=Demo.snap();renderAll();toast(res.message||res.error);return;}
+  const key=store.get('sentinel-key')||'';
+  if(!key){pending=[path,body];openKey();return;}
+  try{
+    const r=await fetchT('api/'+path,10000,{method:'POST',headers:{'Content-Type':'application/json','X-Sentinel-Key':key},body:JSON.stringify(body)});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===401){pending=[path,body];openKey(true);return;}
+    toast(r.ok?(j.message||'Done'):(j.error||'That didn’t work. Try again.'));
+    poll();
+  }catch(e){toast('Couldn’t reach the server. Check your connection and try again.');}
+}
+function openKey(wrong){$('#keyModal').hidden=false;const i=$('#keyInput');i.value='';i.placeholder=wrong?'That key didn’t work':'Paste the key here';setTimeout(()=>i.focus(),50);}
+$('#keyCancel').onclick=()=>{$('#keyModal').hidden=true;pending=null;};
+$('#keyForm').addEventListener('submit',e=>{e.preventDefault();const v=$('#keyInput').value.trim();if(!v)return;store.set('sentinel-key',v);$('#keyModal').hidden=true;if(pending){const p=pending;pending=null;act(...p);}});
+
+/* ---------------- demo simulator (same shape as the agent's data) ---------------- */
+const Demo=(()=>{
+  const HOST='ai-lab'; let seq=4800, evseq=0;
+  const alerts=new Map(), events=[], counts=[], sources={}, blocked=new Set(), settings={autoblock:false,notify:{enabled:true,minSev:'high',summary:true,summaryHour:8,tz:'',click:'',webhookSet:true,webhookName:'Sentinel (demo)'}}; let notifyStatus='';
+  const fails={}, fwp={};
+  const rx=[],tx=[]; let bi=6,bo=1.2;
+  for(let i=0;i<150;i++){bi=Math.max(1.5,Math.min(14,bi+rnd(-.8,.8)));bo=Math.max(.3,Math.min(4,bo+rnd(-.3,.3)));rx.push(+(bi+(Math.random()<.05?rnd(20,60):0)).toFixed(2));tx.push(+bo.toFixed(2));}
+  const HOSTILE=[{ip:'203.0.113.47',b:'bf'},{ip:'198.51.100.23',b:'scan'},{ip:'192.0.2.188',b:'spray'},{ip:'203.0.113.154',b:'bf'},{ip:'198.51.100.201',b:'scan'},{ip:'192.0.2.66',b:'bf'}];
+  const USERS=['admin','root','ubuntu','test','oracle','pi','postgres','git','deploy','user'];
+  const services=[['ssh','Remote login (SSH)','active'],['nginx','Web server','active'],['ufw','Firewall','active'],['fail2ban','Brute-force blocker','inactive'],['docker','Containers','active'],['containerd','Container runtime','active'],['ollama','Local AI models','active'],['tailscaled','Tailscale VPN','active'],['cron','Scheduled jobs','active'],['systemd-journald','System log','active'],['unattended-upgrades','Automatic updates','active'],['sentinel-agent','Sentinel agent','active']].map(([name,desc,state])=>({name,desc,state}));
+  const checks=[{id:'ufw',name:'Firewall (ufw) is on',ok:true,detail:'Unsolicited traffic is blocked'},{id:'sshpw',name:'SSH password logins are off',ok:false,detail:'Passwords are accepted, so brute force can work'},{id:'sshroot',name:'Root can’t log in with a password',ok:true,detail:'PermitRootLogin prohibit-password'},{id:'f2b',name:'fail2ban is running',ok:false,detail:'Not running (sudo apt install fail2ban)'},{id:'auto',name:'Automatic security updates',ok:true,detail:'Enabled'},{id:'upd',name:'System is up to date',ok:false,detail:'12 updates waiting (sudo apt upgrade)'},{id:'reboot',name:'No reboot pending',ok:true,detail:'Running the latest installed kernel'}];
+  const listening=[{port:22,addr:'0.0.0.0',proc:'sshd',exposed:true,svc:'SSH'},{port:3000,addr:'0.0.0.0',proc:'docker-proxy',exposed:true,svc:'Web app'},{port:8088,addr:'0.0.0.0',proc:'nginx',exposed:true,svc:'Sentinel'},{port:41641,addr:'0.0.0.0',proc:'tailscaled',exposed:true,svc:'Tailscale'},{port:53,addr:'127.0.0.53',proc:'systemd-resolve',exposed:false,svc:'DNS'},{port:8765,addr:'127.0.0.1',proc:'python3',exposed:false,svc:'Other'},{port:11434,addr:'127.0.0.1',proc:'ollama',exposed:false,svc:'Ollama'}];
+  let peers=[];
+  const GEO={'203.0.113.47':{cc:'CN',country:'China',city:'Shanghai',org:'China Telecom'},'198.51.100.23':{cc:'RU',country:'Russia',city:'Moscow',org:'Selectel'},'192.0.2.188':{cc:'US',country:'United States',city:'Ashburn',org:'DigitalOcean'},'203.0.113.154':{cc:'BR',country:'Brazil',city:'São Paulo',org:'Claro'},'198.51.100.201':{cc:'NL',country:'Netherlands',city:'Amsterdam',org:'Tor exit relay'},'192.0.2.66':{cc:'VN',country:'Vietnam',city:'Hanoi',org:'Viettel'},'198.51.100.77':{cc:'DE',country:'Germany',city:'Frankfurt',org:'Hetzner'}};
+  const t0=Date.now();
+  const F=(port,level,title,advice)=>({port,level,title,advice});
+  const devices=[
+    {mac:'a4:2b:b0:11:22:01',ip:'10.20.1.1',vendor:'TP-LINK TECHNOLOGIES',host:'',gateway:true,known:true,findings:[F(53,'info','DNS',''),F(80,'info','Web admin page (not encrypted)','If this is a router, camera or printer, change the default admin password.'),F(443,'info','Web page (encrypted)','')]},
+    {mac:'04:d9:f5:11:22:02',ip:'10.20.1.101',vendor:'ASUSTek COMPUTER',host:'desktop.lan',known:true,findings:[F(3389,'medium','Remote Desktop is open','Fine for your own PC on your home network. Use a strong password and keep Windows updated.'),F(445,'low','File sharing (SMB) is open','Normal for PCs and NAS drives. Make sure guest access is off and it isn’t forwarded from your router.')]},
+    {mac:'4c:de:11:22:33:03',ip:'10.20.1.112',vendor:'Micro-Star INTL',host:'',self:true,known:true,findings:[]},
+    {mac:'da:3f:11:22:33:04',ip:'10.20.1.31',vendor:'Private address (phone, tablet or laptop)',host:'Phone.lan',known:true,findings:[F(62078,'info','Apple device sync','')]},
+    {mac:'58:fd:b1:22:33:05',ip:'10.20.1.50',vendor:'LG Electronics',host:'LGwebOSTV.lan',known:true,findings:[F(8008,'info','Chromecast / Google Cast','')]},
+    {mac:'9c:8e:cd:22:33:06',ip:'10.20.1.60',vendor:'Amcrest Technologies',host:'',known:false,watch:true,findings:[F(23,'high','Telnet is open','Telnet sends passwords in plain text and is the favourite way in for botnets like Mirai. Turn it off in the device’s settings or update its firmware. If you can’t, consider replacing the device.'),F(554,'low','Camera video stream (RTSP) is open','Normal for cameras. Make sure the camera doesn’t use its default password.'),F(80,'info','Web admin page (not encrypted)','')]},
+    {mac:'68:54:fd:22:33:07',ip:'10.20.1.70',vendor:'Amazon Technologies',host:'',known:true,findings:[]},
+    {mac:'00:0e:58:22:33:08',ip:'10.20.1.72',vendor:'Sonos',host:'',known:true,findings:[F(1900,'info','UPnP','')]},
+    {mac:'00:04:4b:22:33:09',ip:'10.20.1.80',vendor:'HP Inc.',host:'HP-LaserJet.lan',known:true,findings:[F(80,'info','Web admin page (not encrypted)','If this is a device’s admin page, change the default password.'),F(631,'info','Printing (IPP)',''),F(9100,'info','Printing (raw)','')]},
+    {mac:'70:9e:29:22:33:10',ip:'10.20.1.90',vendor:'Sony Interactive Entertainment',host:'PS5.lan',known:true,findings:[]},
+    {mac:'ec:fa:bc:22:33:11',ip:'10.20.1.144',vendor:'Espressif Inc.',host:'',known:false,findings:[F(1883,'medium','Smart-home messaging (MQTT) is open without encryption','Make sure your MQTT broker requires a username and password.'),F(80,'info','Web admin page (not encrypted)','')]},
+    {mac:'00:17:88:22:33:12',ip:'10.20.1.95',vendor:'Philips Lighting',host:'',known:true,online:false,findings:[F(80,'info','Web admin page (not encrypted)',''),F(443,'info','Web page (encrypted)','')]},
+  ].map(d=>({name:'',first:t0-9*86400000,last:d.online===false?t0-7200000:t0,online:d.online!==false,watch:!!d.watch,ports:d.findings.map(f=>f.port),lastScan:d.self?0:t0-ri(20,300)*60000,baseline:true,...d}));
+  const tailnet=[{id:'1',name:'homelab',os:'linux',ips:['100.64.0.10'],online:true,self:true},{id:'2',name:'phone',os:'iOS',ips:['100.64.0.11'],online:true},{id:'3',name:'desktop',os:'windows',ips:['100.64.0.12'],online:true},{id:'4',name:'laptop',os:'macOS',ips:['100.64.0.13'],online:false}];
+  function mkPeers(){
+    const base=[{ip:'10.20.1.20',port:51234,lport:22,dir:'in',svc:'SSH',lan:true},{ip:'10.20.1.31',port:60311,lport:8088,dir:'in',svc:'Sentinel',lan:true},{ip:'10.20.1.20',port:52110,lport:3000,dir:'in',svc:'Web app',lan:true},{ip:'100.64.0.11',port:41641,lport:41641,dir:'in',svc:'Tailscale',lan:true}];
+    const out=['140.82.112.3','151.101.1.69','104.18.32.7','185.199.108.133','34.117.59.81','172.64.155.209','13.107.42.14'];
+    const n=ri(3,6); for(let i=0;i<n;i++) base.push({ip:out[(i+ri(0,6))%out.length],port:443,lport:ri(40000,60000),dir:'out',svc:'HTTPS',lan:false});
+    peers=base;
+  }
+  mkPeers();
+  function ev(t,act,text,kind,hot){events.push({id:++evseq,t,act,text,hot:!!hot});if(events.length>300)events.shift();counts.push([t,kind]);}
+  function src(ip,t){return sources[ip]||(sources[ip]={ip,first:t,last:t,fails:0,blocks:0,users:new Set(),ports:new Set(),lan:false,why:''});}
+  function upsert(key,sev,title,tech,tac,det,t,ip,user,count){
+    let a=alerts.get(key);
+    if(a){a.last=t;a.det=det;if(count!=null)a.count=count;if(SEVW[sev]<SEVW[a.sev]){a.sev=sev;a.log.push([t,'Severity raised to '+sev]);if(a.status==='closed'){a.status='new';a.log.push([t,'Reopened by new activity']);}}auto(a);return a;}
+    a={id:'SEN-'+(++seq),key,time:t,last:t,sev,t:title,tech,tac,det,host:HOST,src:ip||'—',user:user||'—',status:'new',owner:null,ackAt:null,count:count||1,log:[[t,'Detected by Sentinel agent']]};
+    alerts.set(key,a);auto(a);return a;
+  }
+  function auto(a){if(!settings.autoblock||!/^(bf|sp|scan):/.test(a.key)||a.src==='—'||blocked.has(a.src))return;blocked.add(a.src);a.log.push([Date.now(),`Automatically blocked ${a.src} at the firewall`]);ev(Date.now(),'DROP','Auto-blocked '+a.src,'system');}
+  const hour=t=>Math.floor(t/3600000);
+  function sshFail(t,ip,user){
+    const s=src(ip,t);s.last=t;
+    if(blocked.has(ip)){s.blocks++;s.ports.add(22);ev(t,'DROP',`${ip} → :22 TCP blocked by firewall`,'drop');return;}
+    s.fails++;s.users.add(user);s.why='SSH login failures';
+    ev(t,'FAIL',`SSH login failed for invalid user ${user} from ${ip}`,'fail',true);
+    const dq=(fails[ip]=(fails[ip]||[]).filter(x=>x[0]>t-1800000));dq.push([t,user]);
+    const n60=dq.filter(x=>x[0]>t-60000).length,n5=dq.filter(x=>x[0]>t-300000).length;
+    if(n60>=5||n5>=10) upsert(`bf:${ip}:${hour(t)}`,n5>=40?'critical':'high','SSH brute-force attempt','T1110.001','Credential Access',`${n5} failed SSH logins in 5 minutes from ${ip}`,t,ip,user,s.fails);
+    const us=new Set(dq.filter(x=>x[0]>t-300000).map(x=>x[1]));
+    if(us.size>=4) upsert(`sp:${ip}:${hour(t)}`,'high','Password spray across accounts','T1110.003','Credential Access',`${us.size} different usernames tried from ${ip} in 5 minutes (${[...us].slice(0,6).join(', ')})`,t,ip,null,us.size);
+  }
+  function fwBlock(t,ip,port){
+    const s=src(ip,t);s.last=t;s.blocks++;s.ports.add(port);if(!s.why)s.why='Blocked by firewall';
+    ev(t,'DROP',`${ip} → 10.20.1.10:${port} TCP blocked by firewall`,'drop');
+    const dq=(fwp[ip]=(fwp[ip]||[]).filter(x=>x[0]>t-120000));dq.push([t,port]);
+    const ps=new Set(dq.map(x=>x[1]));
+    if(ps.size>=10){s.why='Port scanning';upsert(`scan:${ip}:${hour(t)}`,'medium','Port scan detected','T1046','Discovery',`${ip} probed ${ps.size} different ports in 2 minutes`,t,ip,null,ps.size);}
+  }
+  function step(t){
+    if(Math.random()<.45){const h=pick(HOSTILE);
+      if(h.b==='scan'){for(let i=0;i<ri(1,4);i++)fwBlock(t,h.ip,pick([21,23,25,80,110,135,139,445,1433,3306,3389,5900,6379,8080,9200,27017]));}
+      else for(let i=0;i<ri(1,3);i++)sshFail(t,h.ip,h.b==='spray'?pick(USERS):pick(['root','admin']));}
+    if(Math.random()<.04){ev(t,'ALLOW','SSH login accepted for labadmin from 10.20.1.20 (publickey)','login');}
+    if(Math.random()<.03){ev(t,'INFO','sudo by labadmin: '+pick(['/usr/bin/apt update','/usr/bin/docker ps','/usr/bin/systemctl restart ollama','/usr/bin/ufw status']),'sudo');}
+    if(Math.random()<.01){const t2=t;upsert(`new:labadmin:100.64.0.11`,'low','Sign-in from a new address','T1078','Initial Access','labadmin signed in from 100.64.0.11 for the first time (publickey)',t2,'100.64.0.11','labadmin');}
+    if(Math.random()<.004){const a=upsert(`sudo:labadmin:${hour(t)}`,'medium','Repeated sudo password failures','T1548.003','Privilege Escalation','3 failed sudo/su password attempts by labadmin in 10 minutes',t,null,'labadmin',3);}
+  }
+  // seed ~40 minutes of history
+  const now=Date.now();
+  for(let i=240;i>0;i--) step(now-i*10000);
+  upsert('sf:198.51.100.77:labadmin:'+hour(now-1500000),'critical','Login succeeded after repeated failures','T1078','Initial Access','labadmin signed in from 198.51.100.77 after 4 failed attempts',now-1500000,'198.51.100.77','labadmin');
+  upsert('port:3000','medium','New service listening on the network','T1543','Persistence','docker-proxy started listening on port 3000 (0.0.0.0)',now-2100000);
+  let k=0; for(const a of alerts.values()){ if(k++%2===0 && a.sev!=='critical'){a.status='ack';a.owner='You';a.ackAt=a.time+ri(90,600)*1000;a.log.push([a.ackAt,'Acknowledged from the dashboard']);} }
+  let cpu=18, tickN=0;
+  function tick(){
+    const t=Date.now();tickN++;
+    bi=Math.max(1.5,Math.min(14,bi+rnd(-.8,.8)));bo=Math.max(.3,Math.min(4,bo+rnd(-.3,.3)));
+    if(tickN%1===0){rx.shift();tx.shift();rx.push(+(bi+(Math.random()<.05?rnd(20,60):0)).toFixed(2));tx.push(+bo.toFixed(2));}
+    cpu=Math.max(4,Math.min(96,cpu+rnd(-6,6)));
+    step(t); if(tickN%20===0) mkPeers();
+  }
+  function snap(){
+    const t=Date.now();
+    const c={};counts.filter(x=>x[0]>t-3600000).forEach(([,k])=>c[k]=(c[k]||0)+1);
+    const protocols={};peers.forEach(p=>protocols[p.svc]=(protocols[p.svc]||0)+1);
+    return {mode:'demo',now:t,host:{name:HOST,os:'Ubuntu 25.04',kernel:'6.14.0',ips:['10.20.1.10','100.64.0.10']},
+      metrics:{cpu:+cpu.toFixed(1),memUsed:21.4e9+rnd(-2e8,2e8),memTotal:32e9,diskUsed:612e9,diskTotal:1e12,load:[+(cpu/25).toFixed(2),1.12,0.94],cores:8,uptime:1123200+Math.floor((t-now)/1000)},
+      traffic:{iface:'enp3s0',interval:2,rx:[...rx],tx:[...tx]},
+      kpi:{events1h:Object.values(c).reduce((a,b)=>a+b,0),fails1h:c.fail||0,drops1h:c.drop||0,logins1h:c.login||0},
+      alerts:[...alerts.values()].sort((a,b)=>b.last-a.last).map(a=>({...a,log:[...a.log]})),
+      events:events.slice(-150).reverse(),
+      sources:Object.values(sources).sort((a,b)=>b.last-a.last).map(s=>({...s,edgeOnly:s.why==='Blocked by firewall'||s.why==='Port scanning',blockedAt:blocked.has(s.ip)?'router':'',users:[...s.users].slice(0,8),nusers:s.users.size,ports:[...s.ports].sort((a,b)=>a-b).slice(0,12),blocked:blocked.has(s.ip),why:s.why||'Suspicious activity'})),
+      services,checks,net:{established:peers.length,peers,listening,protocols,newPerMin:ri(2,9)},
+      pfsense:{enabled:true,host:'',hostEffective:'10.20.1.1',user:'admin',iface:'wan',port:5140,sshOk:true,sshMsg:'Connected. Blocks apply to your whole network.',lastLog:t-ri(3,40)*1000,logs1h:ri(700,900),keyReady:true,pubkey:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyOnlyNotRealk8d0p2VqT7xYz sentinel@ai-lab'},settings:{autoblock:settings.autoblock,devices:{notifyNew:settings.devicesNotify!==false},notify:{...settings.notify}},notifyStatus,lan:{iface:'enp1s0',subnet:'10.20.1.0/24',scanner:'arp-scan',lastSweep:t-ri(20,200)*1000,gateway:'10.20.1.1'},devices:devices.map(d=>({...d,findings:[...d.findings]})),tailnet,geo:GEO,firewall:{ufw:'active',blocked:[...blocked]},learning:false};
+  }
+  function apply(path,body){
+    const t=Date.now();
+    if(path==='alert'){const a=[...alerts.values()].find(x=>x.id===body.id);if(!a)return{error:'That alert no longer exists.'};
+      const m={ack:['ack','Acknowledged from the dashboard'],escalate:['escalated','Escalated for investigation'],close:['closed','Closed from the dashboard'],reopen:['new','Reopened']}[body.action];
+      a.status=m[0];if(body.action!=='reopen'){a.ackAt=a.ackAt||t;a.owner='You';}a.log.push([t,m[1]]);return{message:a.id+' updated'};}
+    if(path==='block'){blocked.add(body.ip);ev(t,'DROP',body.ip+' blocked (from dashboard)','system');alerts.forEach(a=>{if(a.src===body.ip&&a.status!=='closed')a.log.push([t,body.ip+' blocked.']);});return{message:body.ip+' blocked.'};}
+    if(path==='unblock'){blocked.delete(body.ip);ev(t,'INFO',body.ip+' unblocked (from dashboard)','system');return{message:body.ip+' unblocked.'};}
+    if(path==='settings'){if('autoblock' in body){settings.autoblock=!!body.autoblock;return{message:'Automatic blocking '+(settings.autoblock?'on':'off')};}
+      if(body.notify){const n=body.notify;['enabled','summary','minSev','summaryHour','tz'].forEach(k=>{if(k in n&&n[k]!=='')settings.notify[k]=n[k];});if('webhook' in n){settings.notify.webhookSet=!!n.webhook;settings.notify.webhookName=n.webhook?'Sentinel (demo)':'';return{message:n.webhook?'Connected to Sentinel (demo)':'Discord disconnected'};}return{message:body.message||'Notification settings saved'};}}
+    if(path==='pfsense')return{message:body.action==='test'?'Connected. Blocks apply to your whole network.':body.action==='disconnect'?'Router blocking turned off (demo)':'Saved (demo)'};
+    if(path==='lan-sweep')return{message:'Scanning your network. New devices show up in about a minute.'};
+    if(path==='device'){const d=devices.find(x=>x.mac===body.mac);if(!d)return{error:'That device isn\u2019t in the list anymore.'};const L=()=>d.name||d.host||d.vendor;
+      if(body.action==='rename'){d.name=body.name;return{message:body.name?'Renamed to '+body.name:'Name cleared'};}
+      if(body.action==='known'){d.known=body.value;return{message:(body.value?'Marked as yours':'Marked as not yours')};}
+      if(body.action==='watch'){d.watch=body.value;return{message:body.value?'Watching it. You\u2019ll get an alert if it goes offline.':'Stopped watching'};}
+      if(body.action==='scan'){d.lastScan=Date.now();return{message:'Checking it for risky services. Results in about a minute.'};}
+      if(body.action==='forget'){devices.splice(devices.indexOf(d),1);return{message:'Removed from the list. If it\u2019s still on your network it will show up again as new.'};}}
+    if(path==='settings'&&body.devices){settings.devicesNotify=!!body.devices.notifyNew;return{message:'New-device posts to Discord '+(settings.devicesNotify?'on':'off')};}
+    if(path==='notify-test'){notifyStatus='Test sent at '+hhmm(Date.now())+' (demo)';return{message:'In the demo nothing is sent. On your server this posts to your Discord channel.'};}
+    return{error:'Unknown action'};
+  }
+  return {tick,snap,apply};
+})();
+
+/* ================= RENDER ================= */
+const open=()=>S.alerts.filter(a=>a.status!=='closed');
+const blockedSet=()=>new Set(S.firewall?.blocked||[]);
+function hostileActive(){const t=S.now||Date.now();return (S.sources||[]).filter(s=>!s.blocked&&!s.edgeOnly&&!s.lan&&t-s.last<15*60000).length;}
+
+function renderConn(){
+  const b=$('#pause'),txt=$('#pauseTxt');
+  b.classList.toggle('demo',MODE==='demo');b.classList.toggle('lost',MODE==='lost');
+  txt.textContent=paused?'Paused':MODE==='live'?`Live · ${S?.host?.name||''}`:MODE==='demo'?'Demo':MODE==='lost'?'Offline':'Connecting';
+  $('#demoBanner').hidden=MODE!=='demo';$('#lostBanner').hidden=MODE!=='lost';
+}
+function renderThreat(){
+  const score=open().reduce((s,a)=>s+({critical:5,high:2,medium:.7,low:.2})[a.sev],0)+hostileActive()*0.8;
+  const lvl=score>34?4:score>22?3:score>12?2:score>5?1:0;
+  const L=[['Low',C.ok,'--ok-bg'],['Guarded',C.cyan,'--cyan-bg'],['Elevated',C.med,'--med-bg'],['High',C.high,'--high-bg'],['Severe',C.crit,'--crit-bg']][lvl];
+  const p=$('#threat');p.textContent=`Threat · ${L[0]}`;p.style.color=L[1];p.style.background=`var(${L[2]})`;
+}
+function mtta(){const a=S.alerts.filter(x=>x.ackAt&&x.ackAt>=x.time);if(!a.length)return null;return a.reduce((s,x)=>s+(x.ackAt-x.time),0)/a.length/60000;}
+
+function renderOverview(){
+  const o=open(),c=s=>o.filter(a=>a.sev===s).length;
+  $('#k-open').textContent=o.length;
+  $('#k-open-sub').innerHTML=`<span style="color:var(--crit)">${c('critical')} critical</span> · <span style="color:var(--high)">${c('high')} high</span>`;
+  $('#k-ev').textContent=S.kpi.events1h;
+  $('#k-stop').textContent=S.kpi.drops1h+S.kpi.fails1h;
+  $('#k-stop-sub').textContent=`${S.kpi.drops1h} firewall drops · ${S.kpi.fails1h} failed logins (1h)`;
+  const m=mtta(); $('#k-mtta').innerHTML=m==null?'—':`${m<10?m.toFixed(1):Math.round(m)}<small>min</small>`;
+  const sv=S.services||[],ok=sv.filter(s=>s.state==='active').length;
+  $('#k-svc').innerHTML=sv.length?`${ok}<small>/ ${sv.length}</small>`:'—';
+  $('#k-svc-sub').textContent=!sv.length?'no services found':ok===sv.length?'all running':`${sv.length-ok} not running`;
+  const att=S.alerts.filter(a=>a.status==='new'&&(a.sev==='critical'||a.sev==='high')).sort((a,b)=>SEVW[a.sev]-SEVW[b.sev]||b.last-a.last).slice(0,4);
+  $('#attention').innerHTML=att.length?att.map(a=>`<button data-id="${esc(a.id)}"><span class="sev ${a.sev}">${a.sev}</span><span><span class="t">${esc(a.t)}</span><br><span class="s">${esc(a.src!=='—'?a.src:a.user)} · ${hhmm(a.last)}</span></span><span class="go">›</span></button>`).join(''):'<p class="empty" style="padding:4px 18px 16px">Nothing urgent. Every critical and high alert has been handled.</p>';
+  const counts={};TACTICS.forEach(t=>counts[t]=0);o.forEach(a=>{if(a.tac in counts)counts[a.tac]++;});const max=Math.max(1,...Object.values(counts));
+  $('#attack').innerHTML=TACTICS.map(t=>{const n=counts[t],k=n/max;return `<div class="tac" style="background:${n?`rgba(255,92,99,${(.07+k*.3).toFixed(2)})`:'transparent'};border-color:${n?`rgba(255,92,99,${(.2+k*.35).toFixed(2)})`:C.soft}"><span class="c" style="color:${n?C.ink:C.ink3}">${n}</span><span class="n">${t}</span></div>`}).join('');
+  const M=S.metrics||{};const cores=M.cores||1;
+  const meter=(lbl,pct,val)=>{const col=pct>90?C.crit:pct>75?C.high:C.cyan;return `<div class="meter"><span>${lbl}</span><span class="track"><span class="fill" style="width:${Math.min(100,pct||0).toFixed(1)}%;background:${col}"></span></span><span class="v">${val}</span></div>`;};
+  $('#srvMeta').textContent=M.uptime?`up ${dur(M.uptime)}`:'';
+  $('#server').innerHTML=`<div class="srv-h"><b class="mono">${esc(S.host.name)}</b><span>${esc(S.host.os)}${S.host.ips?.length?' · '+esc(S.host.ips.slice(0,2).join(', ')):''}</span></div>
+   ${meter('CPU',M.cpu,(M.cpu??0).toFixed(0)+'%')}
+   ${meter('Memory',M.memTotal?M.memUsed/M.memTotal*100:0,`${bytes(M.memUsed)} / ${bytes(M.memTotal)}`)}
+   ${meter('Disk',M.diskTotal?M.diskUsed/M.diskTotal*100:0,`${M.diskTotal?Math.round(M.diskUsed/M.diskTotal*100):0}% of ${bytes(M.diskTotal)}`)}
+   <div class="srv-foot"><span>Load <b>${(M.load||[]).map(x=>x.toFixed(2)).join(' · ')}</b></span><span><b>${cores}</b> cores</span>${S.learning?'<span>Learning normal activity</span>':''}</div>`;
+  $('#trafficMeta').textContent=`${S.traffic.iface||'network'} · last 5 min`;
+  drawChart();
+}
+$('#attention').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(!b)return;openId=b.dataset.id;filter='open';document.querySelectorAll('#sevFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f==='open'));alertSig='';renderAlerts();show('alerts');const el=document.querySelector(`.al[data-id="${CSS.escape(openId)}"]`);el&&el.scrollIntoView({block:'center'});});
+
+/* ---------- alerts ---------- */
+let filter='open',openId=null,alertSig='',seenIds=null;
+const STATUS={new:'New',ack:'In triage',escalated:'Escalated',closed:'Closed'};
+function isIP(s){return /^[0-9a-f:.]+$/i.test(s||'')&&/[.:]/.test(s);}
+function alertCard(a,fresh){
+  const o=a.id===openId, bl=blockedSet(), canBlock=isIP(a.src);
+  return `<article class="al ${o?'open':''} ${fresh?'fresh':''} ${a.status==='closed'?'is-closed':''}" data-id="${esc(a.id)}">
+    <button class="al-head" aria-expanded="${o}">
+      <span class="row1"><span class="sev ${a.sev}">${a.sev}</span><span class="st ${a.status}">${STATUS[a.status]||a.status}</span>${canBlock&&bl.has(a.src)?'<span class="tag ok">Source blocked</span>':''}</span>
+      <span class="t">${esc(a.t)}</span>
+      <span class="s">${esc([a.src!=='—'?a.src:null,a.user!=='—'?a.user:null,a.tech].filter(Boolean).join(' · '))}</span>
+      <span class="side"><span class="tm">${hhmm(a.last)}</span>${a.count>1?`<span class="cnt">×${a.count}</span>`:''}</span>
+    </button>
+    ${o?`<div class="al-body">
+      <p>${esc(a.det)}.</p>
+      <dl class="kv"><dt>ID</dt><dd>${esc(a.id)}</dd><dt>Tactic</dt><dd>${esc(a.tac)} · ${esc(a.tech)}</dd><dt>Host</dt><dd>${esc(a.host)}</dd><dt>Source</dt><dd>${esc(a.src)}${geoText(a.src)?'<br><span style="color:var(--ink-2)">'+esc(geoText(a.src))+'</span>':''}</dd><dt>User</dt><dd>${esc(a.user)}</dd><dt>First seen</dt><dd>${new Date(a.time).toLocaleString()}</dd><dt>Last seen</dt><dd>${new Date(a.last).toLocaleString()}</dd></dl>
+      <div class="actions">
+        <button class="btn primary" data-act="ack" ${a.status!=='new'?'disabled':''}>Acknowledge</button>
+        <button class="btn" data-act="escalate" ${a.status==='escalated'||a.status==='closed'?'disabled':''}>Escalate</button>
+        ${canBlock?`<button class="btn ${bl.has(a.src)?'':'danger'}" data-act="${bl.has(a.src)?'unblock':'block'}">${bl.has(a.src)?'Unblock '+esc(a.src):'Block '+esc(a.src)}</button>`:''}
+        ${a.status==='closed'?'<button class="btn ghost" data-act="reopen">Reopen</button>':'<button class="btn ghost" data-act="close">Close</button>'}
+      </div>
+      <ul class="timeline">${a.log.slice(-12).map(([t,m])=>`<li><span>${hhmmss(t)}</span><span>${esc(m)}</span></li>`).join('')}</ul>
+    </div>`:''}
+  </article>`;
+}
+function visible(){return S.alerts.filter(a=>filter==='open'?a.status!=='closed':filter==='closed'?a.status==='closed':a.sev===filter&&a.status!=='closed');}
+function renderAlerts(){
+  const o=open();
+  ['critical','high','medium','low'].forEach(s=>$('#c-'+s).textContent=o.filter(a=>a.sev===s).length);
+  $('#c-open').textContent=o.length;
+  const nw=S.alerts.filter(a=>a.status==='new').length;
+  $('#qmeta').textContent=nw?`${nw} waiting to be acknowledged`:'All caught up';
+  const b=$('#badge');b.hidden=!nw;b.textContent=nw>99?'99+':nw;
+  const rows=visible().slice(0,60);
+  const sig=filter+'|'+openId+'|'+[...blockedSet()].join(',')+'|'+rows.map(a=>a.id+a.status+a.sev+a.count+a.log.length+a.last).join(';');
+  if(sig===alertSig)return; alertSig=sig;
+  const ids=new Set(S.alerts.map(a=>a.id)); const fresh=seenIds?new Set([...ids].filter(i=>!seenIds.has(i))):new Set(); seenIds=ids;
+  $('#alist').innerHTML=rows.map(a=>alertCard(a,fresh.has(a.id))).join('')||`<p class="empty">${filter==='closed'?'No closed alerts yet.':'No alerts here. Sentinel is watching.'}</p>`;
+}
+$('#alist').addEventListener('click',e=>{
+  const card=e.target.closest('.al');if(!card)return;const a=S.alerts.find(x=>x.id===card.dataset.id);if(!a)return;
+  const b=e.target.closest('[data-act]');
+  if(!b){if(e.target.closest('.al-head')){openId=openId===a.id?null:a.id;alertSig='';renderAlerts();}return;}
+  const x=b.dataset.act;
+  if(x==='block'||x==='unblock')act(x,{ip:a.src});else act('alert',{id:a.id,action:x});
+});
+$('#sevFilter').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;filter=b.dataset.f;document.querySelectorAll('#sevFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x===b));alertSig='';renderAlerts();});
+
+/* ---------- network ---------- */
+let feedTop=-1;
+function renderNetwork(){
+  const n=S.net||{};
+  $('#netmeta').textContent=`${n.established||0} active connection${n.established===1?'':'s'} · ${n.newPerMin||0} new per minute · ${hostileActive()} hostile source${hostileActive()===1?'':'s'}`;
+  const ev=S.events||[];
+  const top=ev.slice(0,40).map(e=>e.id+'.'+e.t).join(',');
+  if(top!==feedTop){feedTop=top;
+    // collapse repeats of the same event (ignoring the changing source port) into one line with a count
+    const key=r=>r.act+'|'+r.text.replace(/:\d+ →/,' →').replace(/:(151[45])\b/,':1514');
+    const grouped=[];ev.forEach(r=>{const g=grouped.find(x=>x.k===key(r));if(g){g.n++;g.first=r.t;}else grouped.push({...r,k:key(r),n:1,first:r.t});});
+    $('#feed').innerHTML=ev.length?grouped.map(r=>`<div class="row${r.hot?' hot':''}"><span class="tm">${hhmmss(r.t)}</span><span class="ac ${esc(r.act)}">${esc(r.act)}</span><span class="d" title="${esc(r.text)}${r.n>1?` (${r.n} times since ${hhmmss(r.first)})`:''}">${r.n>1?`<b style="color:var(--ink);font-weight:600">×${r.n}</b> `:''}${esc(r.text)}</span></div>`).join(''):'<p class="empty">No security events yet. Logins, sudo use and firewall blocks will appear here.</p>';}
+  const L=n.listening||[];
+  $('#portsMeta').textContent=`${L.filter(p=>p.exposed).length} reachable from the network`;
+  $('#ports').innerHTML=L.length?L.slice(0,14).map(p=>`<div class="rw"><span class="port">${p.port}</span><span class="nm">${esc(p.proc)}<small>${esc(p.svc!=='Other'?p.svc+' · ':'')}${esc(p.addr)}</small></span><span class="tag ${p.exposed?'bad':''}" style="${p.exposed?'':'color:var(--ink-3)'}">${p.exposed?'Network':'Local only'}</span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">No listening ports found.</p>';
+  const P=Object.entries(n.protocols||{}).sort((a,b)=>b[1]-a[1]);const tot=P.reduce((s,[,v])=>s+v,0);
+  const cols={SSH:C.high,HTTPS:C.cyan,HTTP:C.cyan,DNS:C.violet,Sentinel:C.ok,'Web app':C.med,Ollama:C.violet,Tailscale:C.low};
+  $('#proto').innerHTML=P.length?P.slice(0,8).map(([k,v])=>`<div class="bar"><span class="k">${esc(k)}</span><span class="track"><span class="fill" style="width:${(v/tot*100).toFixed(1)}%;background:${cols[k]||C.ink3}"></span></span><span class="v">${v}</span></div>`).join(''):'<p class="empty">No active connections right now.</p>';
+  buildMap();
+  if(selNode)renderNodeInfo();
+}
+
+/* ---------- network map: hub with cards ---------- */
+const mc=$('#map'),mbox=mc.parentElement;let mctx,mw,mh,M=null,particles=[],selNode=null;
+function sizeMap(){const r=mc.getBoundingClientRect();if(!r.width)return;const dpr=devicePixelRatio||1;mc.width=r.width*dpr;mc.height=r.height*dpr;mctx=mc.getContext('2d');mctx.setTransform(dpr,0,0,dpr,0,0);mw=r.width;mh=r.height;buildMap();drawMap();}
+function textW(t,font){mctx.font=font;return mctx.measureText(t).width;}
+function trunc(t,max,font){if(textW(t,font)<=max)return t;while(t.length>1&&textW(t+'…',font)>max)t=t.slice(0,-1);return t+'…';}
+function devIcon(d){
+  const s=((d.name||'')+' '+(d.host||'')+' '+(d.vendor||'')).toLowerCase();
+  if(d.self)return '🖥️'; if(d.gateway)return '🛡️';
+  const rules=[[/switch(?!.*nintendo)/,'🔀'],[/access ?point|\bap\b|gl\.?inet|ubiquiti|unifi|mesh|eero|orbi|deco/,'📶'],[/iphone|phone|android|pixel|galaxy|oneplus|private address/,'📱'],[/ipad|tablet/,'📱'],
+    [/xbox|playstation|ps[45]|nintendo|steam ?deck|sony interactive/,'🎮'],[/pi\.?hole|raspberry|\bpi\b/,'🍓'],[/kali|beelink|linux|nuc|server|proxmox|nas|synology|qnap/,'🐧'],
+    [/\btv\b|webos|roku|chromecast|fire ?tv|apple ?tv|shield|bravia|vizio/,'📺'],[/print|laserjet|epson|brother|canon/,'🖨️'],[/cam|ring|hikvision|amcrest|wyze|reolink|arlo|nest cam/,'📷'],
+    [/echo|alexa|amazon|sonos|homepod|speaker|google home|nest/,'🔊'],[/hue|philips light|bulb|plug|tasmota|shelly|espressif|tuya|smart/,'💡'],[/mac|laptop|thinkpad|surface/,'💻'],[/pc|desktop|gaming|windows|asus|msi|dell|lenovo|hp/,'💻']];
+  for(const [re,ic] of rules)if(re.test(s))return ic; return '🔌';
+}
+function buildMap(){
+  if(!S||!mctx||!mw)return;
+  const t=S.now||Date.now(), bl=blockedSet(), pad=14, narrow=mw<700;
+  // internet strip along the top: attackers first, then sites the server talks to
+  const ext={};(S.net?.peers||[]).filter(p=>!p.lan).forEach(p=>{const e=ext[p.ip]||(ext[p.ip]={ip:p.ip,kind:'peer',conns:0,dir:p.dir,svcs:new Set()});e.conns++;e.svcs.add(p.svc);if(p.dir==='in')e.dir='in';});
+  const hostile=(S.sources||[]).filter(x=>!x.lan&&t-x.last<30*60000).sort((a,b)=>(a.edgeOnly-b.edgeOnly)||(b.last-a.last)).slice(0,narrow?4:6).map(x=>({ip:x.ip,kind:bl.has(x.ip)||x.edgeOnly?'blocked':'hostile',atRouter:x.edgeOnly||x.blockedAt==='router',src:x,active:t-x.last<90000}));
+  const peers=Object.values(ext).sort((a,b)=>b.conns-a.conns);
+  const maxPills=narrow?6:12, shown=[...hostile,...peers].slice(0,maxPills), more=hostile.length+peers.length-shown.length;
+  const pf='500 11px "IBM Plex Mono",monospace';const pills=[];let x=pad,y=34;const ph=24;
+  const place=(label,obj)=>{const w=Math.min(textW(label,pf)+(obj.kind==='more'?16:30),mw-2*pad);if(x+w>mw-pad){x=pad;y+=ph+8;}pills.push({...obj,label,x,y,w,h:ph});x+=w+8;};
+  shown.forEach(n=>{const g=S.geo?.[n.ip];place((g?.cc?flagOf(g.cc)+' ':'')+n.ip,n);});
+  if(more>0)place(`+${more} more`,{kind:'more',ip:''});
+  const bandBottom=(pills.length?y+ph:y)+18;
+  // devices on an oval around the server; router at the top, next to the internet
+  const devs=S.devices||[], self=devs.find(d=>d.self);
+  const order=d=>d.gateway?0:/🔀|📶/.test(devIcon(d))?1:needsReview(d)?2:worst(d)<=1?3:4;
+  const mz=multiZone(),zr=d=>d.gateway?-1:mz?zoneRank(d):0;
+  const ring=devs.filter(d=>!d.self).sort((a,b)=>zr(a)-zr(b)||order(a)-order(b)||(b.online-a.online)||devLabel(a).localeCompare(devLabel(b)));
+  // put the router first, then alternate right/left so related gear sits near the top
+  const n=ring.length, cw=narrow?Math.min(132,(mw-2*pad-70)/2):Math.min(190,(mw-2*pad)/4.4), ch=narrow?50:54;
+  const rx=Math.max(40,mw/2-pad-cw/2);
+  const angles=[];for(let i=0;i<n;i++){const k=Math.ceil(i/2)*(i%2?1:-1);angles.push(-Math.PI/2+k*(2*Math.PI/Math.max(n,1)));}
+  let ry=120,cards=[],hub,need;
+  if(narrow){
+    // phone: router on top, the rest in two columns with the server between them
+    const rows=[];const rest=ring.filter(d=>!d.gateway),gw=ring.find(d=>d.gateway);
+    const top=bandBottom+12;let y0=top;
+    if(gw){cards.push({d:gw,x:(mw-cw)/2,y:y0,w:cw,h:ch});y0+=ch+26;}
+    const L=[],Rr=[];rest.forEach((d,i)=>(i%2?Rr:L).push(d));
+    const rowsN=Math.max(L.length,Rr.length,1),step=ch+12;
+    L.forEach((d,i)=>cards.push({d,x:pad,y:y0+i*step,w:cw,h:ch}));
+    Rr.forEach((d,i)=>cards.push({d,x:mw-pad-cw,y:y0+i*step+(L.length>Rr.length?step/2:0),w:cw,h:ch}));
+    const colH=rowsN*step-12;
+    hub={x:mw/2,y:y0+Math.max(colH/2,40),r:24,d:self};
+    need=Math.round(Math.max(y0+colH,hub.y+hub.r+44)+pad);
+  } else {
+  for(let tries=0;tries<80;tries++){
+    const cy0=bandBottom+ch/2+14+ry;
+    cards=ring.map((d,i)=>{const a=angles[i];return {d,a,x:mw/2+Math.cos(a)*rx-cw/2,y:cy0+Math.sin(a)*ry-ch/2,w:cw,h:ch};});
+    const clash=cards.some((c,i)=>cards.some((o,j)=>j>i&&c.x<o.x+o.w+8&&o.x<c.x+c.w+8&&c.y<o.y+o.h+8&&o.y<c.y+c.h+8));
+    const hubClash=cards.some(c=>Math.abs(c.x+c.w/2-mw/2)<c.w/2+58&&Math.abs(c.y+c.h/2-cy0)<c.h/2+58);
+    if(!clash&&!hubClash)break;ry+=12;
+  }
+  hub={x:mw/2,y:bandBottom+ch/2+14+ry,r:30,d:self};
+  need=Math.round(hub.y+ry+ch/2+pad+6);
+  }
+  if(Math.abs(need-mh)>4){mbox.style.height=need+'px';requestAnimationFrame(sizeMap);}
+  const router=cards.find(c=>c.d.gateway)||null;
+  M={pills,cards,hub,router,bandBottom,more,narrow,mz};
+  if(selNode){const k=selNode.key;selNode=[...pills,...cards].find(o=>(o.d?o.d.mac:o.ip)===k)||(k==='hub'?hub:null);if(selNode)selNode.key=k;}
+}
+// geometry helpers
+function cardEdge(c,tx,ty){const cx=c.x+c.w/2,cy=c.y+c.h/2,dx=tx-cx,dy=ty-cy;const k=Math.min(Math.abs((c.w/2)/(dx||1e-6)),Math.abs((c.h/2)/(dy||1e-6)));return [cx+dx*k,cy+dy*k];}
+function curve(c){const H=M.hub,[ex,ey]=cardEdge(c,H.x,H.y);const a=Math.atan2(ey-H.y,ex-H.x);const sx=H.x+Math.cos(a)*(H.r+10),sy=H.y+Math.sin(a)*(H.r+10);
+  const mx=(sx+ex)/2,my=(sy+ey)/2,nx=-(ey-sy),ny=ex-sx,L=Math.hypot(nx,ny)||1,bend=.12;return [[sx,sy],[mx+nx/L*Math.hypot(ex-sx,ey-sy)*bend,my+ny/L*Math.hypot(ex-sx,ey-sy)*bend],[ex,ey]];}
+const qAt=(q,t)=>[(1-t)*(1-t)*q[0][0]+2*(1-t)*t*q[1][0]+t*t*q[2][0],(1-t)*(1-t)*q[0][1]+2*(1-t)*t*q[1][1]+t*t*q[2][1]];
+function pillToRouter(p){const R=M.router;const tx=R?R.x+R.w/2:M.hub.x,ty=R?R.y:M.hub.y-M.hub.r;return [[p.x+p.w/2,p.y+p.h],[p.x+p.w/2,M.bandBottom-8],[tx,M.bandBottom-8],[tx,ty]];}
+function polyAt(pts,t){let L=0;const seg=[];for(let i=1;i<pts.length;i++){const l=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);seg.push(l);L+=l;}let d=t*L;for(let i=0;i<seg.length;i++){if(d<=seg[i]||i===seg.length-1){const k=seg[i]?d/seg[i]:0;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*k,pts[i][1]+(pts[i+1][1]-pts[i][1])*k];}d-=seg[i];}return pts[pts.length-1];}
+function sampleQ(q,n=16){const o=[];for(let i=0;i<=n;i++)o.push(qAt(q,i/n));return o;}
+function rr(g,x,y,w,h,r){g.beginPath();if(g.roundRect)g.roundRect(x,y,w,h,r);else g.rect(x,y,w,h);}
+function drawMap(){
+  if(!mctx||!S||!M)return;const g=mctx,H=M.hub;g.clearRect(0,0,mw,mh);
+  const fwOn=S.firewall?.ufw==='active', lanPeers=new Set((S.net?.peers||[]).filter(p=>p.lan).map(p=>p.ip));
+  g.font='600 10.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink3;g.textAlign='left';g.textBaseline='top';g.fillText('INTERNET',14,12);
+  if(!M.pills.length){g.font='12px -apple-system,system-ui,sans-serif';g.fillText('No internet connections right now',14,36);}
+  // internet bus down to the router card
+  g.strokeStyle=C.line;g.lineWidth=1.4;
+  if(M.pills.length){const R=M.router,tx=R?R.x+R.w/2:H.x,xs=M.pills.map(p=>p.x+p.w/2);g.beginPath();g.moveTo(Math.min(...xs,tx),M.bandBottom-8);g.lineTo(Math.max(...xs,tx),M.bandBottom-8);g.stroke();
+    M.pills.forEach(p=>{g.beginPath();g.moveTo(p.x+p.w/2,p.y+p.h);g.lineTo(p.x+p.w/2,M.bandBottom-8);g.stroke();});
+    g.beginPath();g.moveTo(tx,M.bandBottom-8);g.lineTo(tx,R?R.y:H.y-H.r);g.stroke();}
+  // hub-to-card curves
+  M.cards.forEach(c=>{const q=curve(c),talk=lanPeers.has(c.d.ip)||(c===M.router&&(S.net?.peers||[]).some(p=>!p.lan));
+    g.beginPath();g.moveTo(...q[0]);g.quadraticCurveTo(...q[1],...q[2]);g.strokeStyle=talk?(c===M.router?'rgba(69,198,230,.55)':'rgba(169,139,250,.6)'):(c.d.online?C.line:'rgba(35,50,74,.5)');g.lineWidth=talk?2:1.2;g.setLineDash(c.d.online?[]:[3,5]);g.stroke();g.setLineDash([]);});
+  // moving traffic (under the boxes)
+  particles.forEach(p=>{const [x,y]=polyAt(p.pts,p.t);g.beginPath();g.arc(x,y,p.r,0,7);g.fillStyle=p.col;g.fill();if(p.r>2.5){g.beginPath();g.arc(x,y,p.r+4,0,7);g.fillStyle=p.col+'33';g.fill();}});
+  // pills
+  M.pills.forEach(p=>{const col=p.kind==='hostile'?C.crit:p.kind==='blocked'?C.ok:p.kind==='more'?C.ink3:C.cyan;
+    rr(g,p.x,p.y,p.w,p.h,p.h/2);g.fillStyle=p.kind==='hostile'?'rgba(255,92,99,.12)':p.kind==='blocked'?'rgba(63,209,142,.1)':C.panel2;g.fill();
+    g.lineWidth=selNode===p?2:1;g.strokeStyle=p.kind==='more'?C.line:col;g.globalAlpha=p.kind==='peer'?.55:1;g.stroke();g.globalAlpha=1;
+    if(p.kind!=='more'){g.beginPath();g.arc(p.x+12,p.y+p.h/2,3.5,0,7);g.fillStyle=col;g.fill();}
+    g.font='500 11px "IBM Plex Mono",monospace';g.fillStyle=p.kind==='peer'||p.kind==='more'?C.ink2:col;g.textAlign='left';g.textBaseline='middle';
+    g.fillText(trunc(p.label,p.w-(p.kind==='more'?16:26),g.font),p.x+(p.kind==='more'?8:21),p.y+p.h/2+.5);});
+  // router shield when pfSense is sending its firewall log
+  const pfOn=S.pfsense&&S.pfsense.lastLog&&((S.now||Date.now())-S.pfsense.lastLog<15*60000);
+  if(pfOn&&M.router){const R=M.router;rr(g,R.x-5,R.y-5,R.w+10,R.h+10,14);g.strokeStyle='rgba(63,209,142,.55)';g.lineWidth=2;g.stroke();}
+  // cards
+  M.cards.forEach(c=>{const d=c.d,w=worst(d),sel=selNode===c;g.globalAlpha=d.online?1:.45;
+    rr(g,c.x,c.y,c.w,c.h,11);g.fillStyle=C.panel2;g.fill();
+    g.lineWidth=sel?2.2:1.2;g.strokeStyle=sel?C.cyan:w===0?'rgba(255,92,99,.75)':w===1?'rgba(255,140,66,.65)':needsReview(d)?'rgba(69,198,230,.55)':C.line;g.stroke();
+    const ix=c.x+(M.narrow?18:22),iy=c.y+c.h/2;g.font=`${M.narrow?16:19}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText(devIcon(d),ix,iy+1);
+    g.beginPath();g.arc(c.x+c.w-11,c.y+11,3.8,0,7);g.fillStyle=d.online?C.ok:C.ink3;g.fill();
+    const tx=c.x+(M.narrow?34:42),maxW=c.x+c.w-tx-16;
+    g.textAlign='left';g.font=`600 ${M.narrow?11.5:12.5}px -apple-system,system-ui,sans-serif`;g.fillStyle=C.ink;g.fillText(trunc(devLabel(d),maxW,g.font),tx,c.y+c.h/2-8);
+    const badge=w===0?['RISK',C.crit]:w===1?['RISK',C.high]:needsReview(d)?['NEW',C.cyan]:null;
+    g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;let sub=(M.mz&&d.zone&&!d.gateway?d.zone+' · ':'')+(d.online?d.ip:'offline');
+    if(badge){g.font='700 9px -apple-system,system-ui,sans-serif';const bw=textW(badge[0],g.font)+10;rr(g,c.x+c.w-bw-7,c.y+c.h-20,bw,14,4);g.fillStyle=badge[1]+'2e';g.fill();g.fillStyle=badge[1];g.textAlign='center';g.fillText(badge[0],c.x+c.w-7-bw/2,c.y+c.h-12.5);g.textAlign='left';
+      g.font='10.5px "IBM Plex Mono",monospace';g.fillStyle=C.ink3;g.fillText(trunc(sub,maxW-bw+10,g.font),tx,c.y+c.h/2+9);}
+    else g.fillText(trunc(sub,maxW+8,g.font),tx,c.y+c.h/2+9);
+    g.globalAlpha=1;});
+  // hub (your server) with the firewall ring
+  if(fwOn){g.beginPath();g.arc(H.x,H.y,H.r+10,0,7);g.strokeStyle='rgba(63,209,142,.6)';g.lineWidth=2.4;g.stroke();}
+  else{g.beginPath();g.arc(H.x,H.y,H.r+10,0,7);g.setLineDash([5,5]);g.strokeStyle='rgba(255,92,99,.55)';g.lineWidth=2;g.stroke();g.setLineDash([]);}
+  g.beginPath();g.arc(H.x,H.y,H.r,0,7);g.fillStyle='#122238';g.fill();g.lineWidth=selNode===H?3:2.4;g.strokeStyle=C.cyan;g.stroke();
+  g.font=`${H.r*.9}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;g.textAlign='center';g.textBaseline='middle';g.fillText('🖥️',H.x,H.y+1);
+  g.font='700 12.5px -apple-system,system-ui,sans-serif';g.fillStyle=C.ink;g.fillText(S.host?.name||'server',H.x,H.y+H.r+24);
+  g.font='600 9.5px -apple-system,system-ui,sans-serif';g.fillStyle=fwOn?C.ok:C.crit;g.fillText(fwOn?'FIREWALL ON':'FIREWALL OFF',H.x,H.y+H.r+38);
+}
+function spawn(){
+  if(!M)return;const H=M.hub,lan={};(S.net?.peers||[]).forEach(p=>{if(p.lan)lan[p.ip]=(lan[p.ip]||0)+1;});
+  M.cards.forEach(c=>{const n=lan[c.d.ip];if(!n)return;if(Math.random()<.012*Math.min(n,4)){const pts=sampleQ(curve(c));particles.push({pts:Math.random()<.5?pts:pts.slice().reverse(),t:0,spd:rnd(.01,.018),col:C.violet,r:2.3});}});
+  const R=M.router, toHub=R?sampleQ(curve(R)).slice().reverse():[[H.x,H.y-H.r-10]];
+  const hubToRouter=R?sampleQ(curve(R)):[[H.x,H.y-H.r-10]];
+  M.pills.forEach(p=>{
+    if(p.kind==='peer'){if(Math.random()<.01*Math.min(p.conns,4)){const pts=[...hubToRouter,...pillToRouter(p).slice().reverse()];particles.push({pts:p.dir==='in'?pts.slice().reverse():pts,t:0,spd:rnd(.005,.009),col:C.cyan,r:2.2});}}
+    else if(p.kind==='hostile'||p.kind==='blocked'){if(Math.random()<(p.active?.04:.006)){const pts=p.atRouter&&M.router?pillToRouter(p):[...pillToRouter(p),...toHub];
+      particles.push({pts,t:0,spd:rnd(.005,.008),col:p.kind==='blocked'?C.ok:C.crit,r:3,end:p.kind==='blocked'?(p.atRouter?.93:.985):1});}}
+  });
+}
+function frame(){
+  if(current==='network'&&mctx&&S&&M){
+    if(!paused&&!reduced){spawn();particles.forEach(p=>{p.t+=p.spd;if(p.t>=(p.end||1))p.done=true;});particles=particles.filter(p=>!p.done);if(particles.length>300)particles.splice(0,particles.length-300);}
+    drawMap();
+  }
+  requestAnimationFrame(frame);
+}
+mc.addEventListener('click',e=>{if(!M)return;const r=mc.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;
+  let hit=[...M.pills.filter(p=>p.kind!=='more'),...M.cards].find(o=>x>=o.x-4&&x<=o.x+o.w+4&&y>=o.y-4&&y<=o.y+o.h+4);
+  if(!hit&&Math.hypot(x-M.hub.x,y-M.hub.y)<M.hub.r+12)hit=M.hub;
+  selNode=hit||null;if(hit)hit.key=hit===M.hub?'hub':hit.d?hit.d.mac:hit.ip;renderNodeInfo();});
+function renderNodeInfo(){
+  const box=$('#nodeInfo');if(!selNode){box.hidden=true;return;}
+  const n=selNode,d=n.d;let html='';
+  if(d){const risky=(d.findings||[]).filter(f=>f.level==='high'||f.level==='medium');const talking=(S.net?.peers||[]).filter(p=>p.ip===d.ip);
+    html=`<b style="font-family:var(--sans)">${devIcon(d)} ${esc(devLabel(d))}</b><span style="color:var(--ink-2)">${esc([d.ip,d.vendor&&!d.vendor.startsWith('Private')?d.vendor:''].filter(Boolean).join(' · '))}</span>
+    <span style="color:${d.online?'var(--ok)':'var(--ink-3)'};font-weight:500">${d.online?'Online':'Offline · last seen '+ago(d.last)}${needsReview(d)?' · <span style="color:var(--cyan)">not marked as yours</span>':''}</span>
+    ${talking.length?`<span style="color:var(--violet)">Talking to the server: ${esc([...new Set(talking.map(p=>p.svc))].join(', '))}</span>`:''}
+    ${risky.length?`<span style="color:var(--crit)">${esc(risky.map(f=>f.title).join(' · '))}</span>`:''}
+    <button class="btn" type="button" data-open="${esc(d.mac)}">Open in Devices</button>`;}
+  else if(n===M?.hub){html=`<b style="font-family:var(--sans)">🖥️ ${esc(S.host?.name||'server')}</b><span style="color:var(--ink-2)">${esc((S.host?.ips||[]).slice(0,2).join(' · '))}</span><span style="color:${S.firewall?.ufw==='active'?'var(--ok)':'var(--crit)'};font-weight:500">Firewall ${S.firewall?.ufw==='active'?'on':'off'} · ${S.net?.established||0} active connections</span>`;}
+  else if(n.kind==='peer'){html=`<b>${esc(n.ip)}</b><span style="color:var(--ink-2)">${n.dir==='in'?'Connected to your server':'Your server connected to it'} · ${esc([...n.svcs].join(', '))}</span><span class="mono" style="font-size:12.5px;color:var(--ink-3)">${n.conns} connection${n.conns>1?'s':''}</span>`;}
+  else if(n.src){const s=n.src,bl=blockedSet().has(n.ip);html=`<b>${esc(n.ip)}</b>${geoText(n.ip)?`<span style="color:var(--ink-2)">${esc(geoText(n.ip))}</span>`:''}<span style="color:${bl?'var(--ok)':'var(--crit)'};font-weight:500">${bl?'Blocked by firewall':esc(s.why)}</span><span style="color:var(--ink-2);font-size:13px">${s.fails?`${s.fails} failed logins`:''}${s.fails&&s.blocks?' · ':''}${s.blocks?`${s.blocks} firewall drops`:''} · last seen ${ago(s.last)}</span><button class="btn ${bl?'':'danger'}" data-ip="${esc(n.ip)}" data-a="${bl?'unblock':'block'}">${bl?'Unblock':'Block'} this address</button>`;}
+  box.hidden=false;box.innerHTML=`<button class="x" aria-label="Close">×</button>${html}`;
+  box.querySelector('.x').onclick=()=>{selNode=null;renderNodeInfo();};
+  const ob=box.querySelector('[data-open]');if(ob)ob.onclick=()=>{devOpen=ob.dataset.open;devFilter='all';document.querySelectorAll('#devFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f==='all'));devSig='';selNode=null;box.hidden=true;show('devices');renderDevices();const el=document.querySelector(`.dv[data-mac="${CSS.escape(devOpen)}"]`);el&&el.scrollIntoView({block:'center'});};
+  const bb=box.querySelector('[data-ip]');if(bb)bb.onclick=()=>act(bb.dataset.a,{ip:bb.dataset.ip});
+}
+
+/* ---------- respond ---------- */
+function renderRespond(){
+  const t=S.now||Date.now();
+  const list=(S.sources||[]).slice().sort((a,b)=>((a.blocked||a.edgeOnly)-(b.blocked||b.edgeOnly))||(b.last-a.last)).slice(0,12);
+  $('#srcMeta').textContent=`${hostileActive()} active · ${(S.firewall?.blocked||[]).length} blocked`;
+  $('#blocklist').innerHTML=list.length?list.map(s=>`<div class="bl ${s.blocked?'blocked':''}"><span class="ip">${esc(s.ip)}${s.lan?'<span class="tag">Home network</span>':''}${s.blocked?`<span class="tag ok">${s.blockedAt==='router'?'Blocked at router':'Blocked on server'}</span>`:s.edgeOnly?'<span class="tag ok">Stopped at router</span>':''}</span>
+    <button class="btn ${s.blocked?'':'danger'}" data-ip="${esc(s.ip)}" data-a="${s.blocked?'unblock':'block'}">${s.blocked?'Unblock':'Block'}</button>
+    <span class="why">${geoText(s.ip)?`<span class="geo">${esc(geoText(s.ip))}</span><br>`:''}${esc(s.why)}${s.fails?` · ${s.fails} failed logins`:''}${s.blocks?` · ${s.blocks} drops`:''}${s.nusers?` · ${s.nusers} username${s.nusers>1?'s':''}`:''} · ${ago(s.last)}</span></div>`).join(''):'<p class="empty">No hostile activity seen yet. Failed logins and firewall blocks will show up here.</p>';
+  const fw=S.firewall?.ufw, note=$('#fwNote');
+  note.hidden=fw==='active';
+  note.innerHTML=fw==='inactive'?'The firewall (ufw) is off, so blocks are saved but won’t take effect. To turn it on without locking yourself out, run <span class="mono">sudo ufw allow OpenSSH</span>, <span class="mono">sudo ufw allow 8088/tcp</span>, then <span class="mono">sudo ufw enable</span>.':fw==='missing'?'ufw isn’t installed, so Sentinel can’t block addresses. Install it with <span class="mono">sudo apt install ufw</span>.':'';
+  $('#autoblock').setAttribute('aria-checked',!!S.settings?.autoblock);
+  renderPf();
+  const ck=S.checks||[];
+  $('#checkMeta').textContent=ck.length?`${ck.filter(c=>c.ok).length} of ${ck.length} passing`:'';
+  $('#checks').innerHTML=ck.length?ck.map(c=>`<div class="rw"><span class="ck ${c.ok?'ok':'bad'}">${c.ok?'✓':'!'}</span><span class="nm">${esc(c.name)}<small>${esc(c.detail)}</small></span><span></span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">Running checks…</p>';
+  const sv=S.services||[];
+  $('#svcMeta').textContent=sv.length?`${sv.filter(s=>s.state==='active').length} of ${sv.length} running`:'';
+  const scol={active:C.ok,failed:C.crit,inactive:C.ink3,activating:C.med,deactivating:C.med};
+  $('#services').innerHTML=sv.length?sv.map(s=>`<div class="rw"><span class="hd" style="background:${scol[s.state]||C.ink3}"></span><span class="nm">${esc(s.name)}<small>${esc(s.desc)}</small></span><span class="st" style="color:${scol[s.state]||C.ink3}">${s.state==='active'?'Running':s.state==='inactive'?'Stopped':s.state==='failed'?'Failed':esc(s.state)}</span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">No watched services found.</p>';
+}
+$('#blocklist').addEventListener('click',e=>{const b=e.target.closest('[data-ip]');if(b)act(b.dataset.a,{ip:b.dataset.ip});});
+
+/* ---------- attacker locations ---------- */
+const flagOf=cc=>cc&&cc.length===2?String.fromCodePoint(...[...cc.toUpperCase()].map(c=>0x1F1E6+c.charCodeAt(0)-65)):'';
+function geoText(ip){const g=S?.geo?.[ip];if(!g||!g.country)return '';return `${flagOf(g.cc)} ${[g.city,g.country].filter(Boolean).join(', ')}${g.org?' · '+g.org:''}`.trim();}
+
+/* ---------- devices ---------- */
+let devFilter='all',devZone='all',devOpen=null,devSig='';
+const zonesOf=()=>(S.zones||[]).filter(z=>z.devices);
+const multiZone=()=>zonesOf().length>1;
+const zoneRank=d=>{const i=zonesOf().findIndex(z=>z.name===d.zone);return i<0?99:i;};
+const LEVEL_CLASS={high:'critical',medium:'medium',low:'low'};
+const LEVEL_TXT={high:'High risk',medium:'Medium risk',low:'Low risk'};
+function devLabel(d){
+  if(d.name)return d.name; if(d.self)return (S.host?.name||'server')+' (this server)'; if(d.gateway)return 'Router';
+  if(d.host)return d.host.replace(/\.(lan|home|local|localdomain|home\.arpa)$/i,'');
+  const v=d.vendor||''; return v&&!v.startsWith('Private')?v+' device':(v?'Phone or laptop':'Unknown device');
+}
+const worst=d=>(d.findings||[]).reduce((w,f)=>Math.min(w,{high:0,medium:1,low:2,info:3}[f.level]??3),3);
+const atRisk=d=>worst(d)<=1;
+const needsReview=d=>!d.known&&!d.self;
+function devCard(d){
+  const o=d.mac===devOpen, w=worst(d), lvl=['high','medium','low','info'][w];
+  const risky=(d.findings||[]).filter(f=>f.level!=='info'), info=(d.findings||[]).filter(f=>f.level==='info');
+  const sub=[d.ip,d.vendor&&!d.vendor.startsWith('Private')?d.vendor:(d.vendor?'private address':''),d.host&&d.name?d.host:''].filter(Boolean).join(' · ');
+  return `<article class="al dv ${o?'open':''}" data-mac="${esc(d.mac)}">
+    <button class="al-head" aria-expanded="${o}">
+      <span class="row1"><span class="ddot" style="background:${d.online?C.ok:C.ink3}"></span><span class="st" style="color:${d.online?C.ok:C.ink3}">${d.online?'Online':'Offline · '+ago(d.last)}</span>${needsReview(d)?'<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">New</span>':''}${d.watch?'<span class="tag">Watched</span>':''}${d.self?'<span class="tag">This server</span>':''}${multiZone()&&d.zone?`<span class="tag zone">${esc(d.zone)}</span>`:''}</span>
+      <span class="t">${esc(devLabel(d))}</span>
+      <span class="s">${esc(sub)}</span>
+      <span class="side">${w<=2&&risky.length?`<span class="sev ${LEVEL_CLASS[lvl]}">${LEVEL_TXT[lvl]}</span>`:(d.lastScan?'<span class="tag ok">No risky services</span>':'')}</span>
+    </button>
+    ${o?`<div class="al-body">
+      ${risky.length?`<ul class="fnd">${risky.map(f=>`<li><span class="sev ${LEVEL_CLASS[f.level]}">${f.level}</span><b>${esc(f.title)} <span class="mono" style="color:var(--ink-3);font-weight:400">:${f.port}</span></b><p>${esc(f.advice)}</p></li>`).join('')}</ul>`:`<p>${d.self?'This server is covered by the other tabs.':d.reach===false?`It’s in ${esc(d.zone||'another zone')}, and pfSense keeps this server from reaching it, so Sentinel can’t check its services. That separation is what protects your other devices.`:d.lastScan?'No risky services found in the last check.':'Not checked yet. The first check runs within a few minutes.'}</p>`}
+      ${info.length?`<div class="ports" title="Other open services">${info.map(f=>`<span>${f.port} ${esc(f.title)}</span>`).join('')}</div>`:''}
+      <dl class="kv"><dt>Address</dt><dd>${esc(d.ip)}</dd>${d.zone?`<dt>Zone</dt><dd>${esc(d.zone)}</dd>`:''}<dt>Found by</dt><dd>${d.via==='router'?'pfSense’s device list'+(d.iface?` (${esc(d.iface)})`:''):'This server’s network scan'}</dd><dt>Hardware</dt><dd>${esc(d.mac)}</dd><dt>Maker</dt><dd>${esc(d.vendor||'Unknown')}</dd>${d.host?`<dt>Network name</dt><dd>${esc(d.host)}</dd>`:''}<dt>First seen</dt><dd>${d.baseline?'Before Sentinel started watching':new Date(d.first).toLocaleString()}</dd><dt>Last seen</dt><dd>${d.online?'Now':new Date(d.last).toLocaleString()}</dd><dt>Last checked</dt><dd>${d.reach===false?'Not reachable from this server':d.lastScan?ago(d.lastScan):'Not yet'}</dd></dl>
+      <form class="rename" data-mac="${esc(d.mac)}"><label for="rn-${esc(d.mac)}" style="position:absolute;left:-9999px">Device name</label><input id="rn-${esc(d.mac)}" maxlength="40" placeholder="Name it, e.g. Living room TV" value="${esc(d.name||'')}"><button class="btn" type="submit">Save name</button></form>
+      <div class="actions">
+        ${d.self?'':`<button class="btn ${d.known?'ghost':'primary'}" data-da="known" data-v="${!d.known}">${d.known?'Mark as not mine':'This is mine'}</button>`}
+        <button class="btn" data-da="watch" data-v="${!d.watch}">${d.watch?'Stop watching':'Alert me if it goes offline'}</button>
+        ${d.self||d.reach===false?'':'<button class="btn" data-da="scan">Check it now</button>'}
+        <button class="btn ghost" data-da="forget">Remove from list</button>
+      </div>
+    </div>`:''}
+  </article>`;
+}
+function renderDevices(){
+  const D=S.devices||[], T=S.tailnet||[];
+  const on=D.filter(d=>d.online).length, rev=D.filter(needsReview).length, risk=D.filter(atRisk).length;
+  $('#d-on').innerHTML=D.length?`${on}<small>/ ${D.length}</small>`:'—';$('#d-on-sub').textContent=D.length?`${D.length-on} offline`:'looking for devices';
+  $('#d-new').textContent=rev;$('#d-new').style.color=rev?C.cyan:C.ink;
+  $('#d-risk').textContent=risk;$('#d-risk').style.color=risk?C.crit:C.ink;
+  const tsOn=T.filter(x=>x.online).length;$('#d-ts').innerHTML=T.length?`${tsOn}<small>/ ${T.length}</small>`:'—';$('#d-ts-sub').textContent=T.length?'devices online':'not installed';
+  const b=$('#dBadge');b.hidden=!(rev+risk);b.textContent=rev+risk;
+  const L=S.lan||{};
+  const Z=zonesOf(),P=S.pfsense||{},pfList=!!(P.enabled&&P.sshOk&&P.nbrOk);
+  $('#devMeta').textContent=L.lastSweep?(Z.length>1?`${Z.length} zones`:L.subnet)+` · checked ${ago(L.lastSweep)}`:'First scan starts shortly';
+  $('#lanNote').textContent=(L.scanner?`Sentinel looks for devices on ${L.subnet} every 5 minutes using ${L.scanner==='arp-scan'?'arp-scan, which finds devices even if they ignore ping':'ping and the network’s address table. Installing arp-scan finds more devices'}.`:'Sentinel looks for devices on your network every 5 minutes.')
+    +(pfList?' It also reads pfSense’s device list, so devices in every zone show up here.':P.dhcpLast?' Devices in other zones show up when pfSense reports them getting an address.':' Connect pfSense on the Respond tab to see devices in other zones.');
+  const zf=$('#zoneFilter');zf.hidden=Z.length<2;if(Z.length<2)devZone='all';else if(devZone!=='all'&&!Z.some(z=>z.name===devZone))devZone='all';
+  const zsig=Z.map(z=>z.name+z.online+'/'+z.devices).join('|')+devZone;
+  if(zf.dataset.sig!==zsig){zf.dataset.sig=zsig;zf.innerHTML=`<button class="chip" data-z="all" aria-pressed="${devZone==='all'}">All zones</button>`+Z.map(z=>`<button class="chip" data-z="${esc(z.name)}" aria-pressed="${devZone===z.name}">${esc(z.name)}<b>${z.online}/${z.devices}</b></button>`).join('');}
+  $('#dNotify').setAttribute('aria-checked',S.settings?.devices?.notifyNew!==false);
+  const cnt={all:D.length,review:rev,risk,watch:D.filter(d=>d.watch).length,offline:D.length-on};
+  Object.entries(cnt).forEach(([k,v])=>$('#df-'+k).textContent=v);
+  $('#tsMeta').textContent=T.length?`${tsOn} of ${T.length} online`:'';
+  $('#tsList').innerHTML=T.length?T.map(x=>`<div class="rw"><span class="hd" style="background:${x.online?C.ok:C.ink3}"></span><span class="nm">${esc(x.name)}${x.self?' <span class="tag">This server</span>':''}<small>${esc([x.os,(x.ips||[])[0]].filter(Boolean).join(' · '))}</small></span><span class="st" style="color:${x.online?C.ok:C.ink3}">${x.online?'Online':'Offline'}</span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">Tailscale isn’t running on this server.</p>';
+  if($('#devList').contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
+  const f={all:()=>true,review:needsReview,risk:atRisk,watch:d=>d.watch,offline:d=>!d.online}[devFilter];
+  const rows=D.filter(f).filter(d=>devZone==='all'||d.zone===devZone).sort((a,b)=>(needsReview(b)-needsReview(a))||(worst(a)-worst(b))||(b.online-a.online)||devLabel(a).localeCompare(devLabel(b)));
+  const sig=devFilter+'|'+devZone+'|'+Z.length+'|'+devOpen+'|'+rows.map(d=>[d.mac,d.online,d.known,d.watch,d.name,d.ip,d.lastScan,d.host,d.zone,d.reach,(d.findings||[]).length].join(',')).join(';');
+  if(sig===devSig)return;devSig=sig;
+  $('#devList').innerHTML=rows.map(devCard).join('')||`<p class="empty">${D.length?'No devices match this filter.':'Looking for devices on your network. This takes a minute or two after Sentinel starts.'}</p>`;
+}
+$('#devList').addEventListener('click',e=>{
+  const card=e.target.closest('.dv');if(!card)return;const mac=card.dataset.mac;
+  const b=e.target.closest('[data-da]');
+  if(!b){if(e.target.closest('.al-head')){devOpen=devOpen===mac?null:mac;devSig='';renderDevices();}return;}
+  const a=b.dataset.da;
+  act('device',a==='known'||a==='watch'?{mac,action:a,value:b.dataset.v==='true'}:{mac,action:a});
+  if(a==='forget')devOpen=null;devSig='';
+});
+$('#devList').addEventListener('submit',e=>{e.preventDefault();const f=e.target.closest('.rename');if(!f)return;const v=f.querySelector('input').value.trim();f.querySelector('input').blur();devSig='';act('device',{mac:f.dataset.mac,action:'rename',name:v});});
+$('#zoneFilter').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;devZone=b.dataset.z;$('#zoneFilter').dataset.sig='';devSig='';renderDevices();});
+$('#devFilter').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;devFilter=b.dataset.f;document.querySelectorAll('#devFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x===b));devSig='';renderDevices();});
+$('#sweepNow').onclick=()=>act('lan-sweep',{});
+$('#dNotify').onclick=()=>act('settings',{devices:{notifyNew:!(S.settings?.devices?.notifyNew!==false)}});
+
+/* ---------- pfSense ---------- */
+function renderPf(){
+  const P=S.pfsense;$('#pfCard').hidden=!P;if(!P)return;
+  const t=S.now||Date.now(), logOk=P.lastLog&&t-P.lastLog<15*60000, sshOk=!!(P.enabled&&P.sshOk);
+  const ips=S.host?.ips||[];const srvIp=(S.devices||[]).find(d=>d.self)?.ip||ips.find(i=>/^(10|192\.168)\./.test(i))||ips.find(i=>i.includes('.')&&!/^(100\.|172\.1[7-9]\.)/.test(i))||ips[0]||'SERVER-IP';
+  const ic=(el,ok)=>{el.className='ck '+(ok?'ok':'bad');el.textContent=ok?'✓':'!';};
+  ic($('#pfLogIcon'),logOk);
+  $('#pfLogTxt').textContent=logOk?`Receiving · ${P.logs1h} events in the last hour · last ${ago(P.lastLog)}`:P.lastLog?`No events since ${ago(P.lastLog)}. Check pfSense's remote logging settings.`:'Not receiving yet. Follow the steps below.';
+  $('#pfLogSetup').hidden=logOk; $('#pfSyslog').textContent=`${srvIp}:${P.port||5140}`;
+  const nbrOk=sshOk&&P.nbrOk, dh=P.dhcpLast&&t-P.dhcpLast<24*3600000;
+  ic($('#pfNbrIcon'),nbrOk||dh);
+  $('#pfNbrTxt').textContent=nbrOk?`Reading pfSense’s device list · ${P.nbrCount} devices · updated ${ago(P.nbrLast)}`
+    :sshOk&&P.nbrOk===false?(P.nbrMsg||'pfSense’s device list couldn’t be read.')
+    :dh?`Learning from DHCP events · last ${ago(P.dhcpLast)}. Connect below for the full list, including devices with fixed addresses.`
+    :'Connect Sentinel below so devices in every zone show up on the Devices tab.';
+  ic($('#pfSshIcon'),sshOk);
+  $('#pfSshTxt').textContent=sshOk?`Connected to ${P.hostEffective} as ${P.user}. Block sends internet addresses to pfSense.`:(P.sshMsg||'Off. Block only protects this server.');
+  $('#pfSshSetup').hidden=sshOk; $('#pfOff').hidden=!sshOk;
+  $('#pfKey').textContent=P.pubkey||'Tap “Make key” to create one'; $('#pfMakeKey').hidden=!!P.pubkey;
+  const h=$('#pfHost'),u=$('#pfUser');if(document.activeElement!==h)h.value=P.host||P.hostEffective||'';if(document.activeElement!==u)u.value=P.user||'admin';
+  $('#pfMeta').textContent=sshOk&&logOk?'Connected':logOk?'Log only':sshOk?'Blocking only':'Not connected';
+}
+$('#pfMakeKey').onclick=()=>act('pfsense',{action:'key'});
+$('#pfOff').onclick=()=>act('pfsense',{action:'disconnect'});
+$('#pfForm').addEventListener('submit',async e=>{e.preventDefault();const host=$('#pfHost').value.trim(),user=$('#pfUser').value.trim()||'admin';
+  await act('pfsense',{action:'save',host,user});toast('Connecting to pfSense…');act('pfsense',{action:'test'});});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-copy]');if(!b)return;const el=$('#'+b.dataset.copy);const txt=el.textContent;
+  const sel=()=>{const r=document.createRange();r.selectNodeContents(el);const s=getSelection();s.removeAllRanges();s.addRange(r);toast('Selected. Copy it from the menu.');};
+  if(navigator.clipboard?.writeText)navigator.clipboard.writeText(txt).then(()=>toast('Copied')).catch(sel);else sel();});
+
+/* ---------- phone notifications ---------- */
+const userTz=(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){return ''}})();
+(()=>{const sel=$('#nHour');for(let h=0;h<24;h++){const o=document.createElement('option');o.value=h;o.textContent=`${h%12||12}:00 ${h<12?'AM':'PM'}`;sel.appendChild(o);}})();
+function renderNotify(){
+  const n=S.settings?.notify;$('#notifyCard').hidden=!n||!('webhookSet' in n);if($('#notifyCard').hidden)return;
+  const on=!!n.webhookSet;
+  $('#nSetup').hidden=on;$('#nConnected').hidden=!on;$('#nControls').hidden=!on;
+  $('#nName').textContent=on?`Connected: ${n.webhookName||'Discord webhook'}`:'';
+  $('#nAlerts').setAttribute('aria-checked',!!n.enabled);
+  $('#nSummary').setAttribute('aria-checked',!!n.summary);
+  document.querySelectorAll('#nSev button').forEach(b=>{b.setAttribute('aria-pressed',b.dataset.sev===(n.minSev==='critical'?'critical':'high'));b.disabled=!n.enabled;});
+  const sel=$('#nHour');if(document.activeElement!==sel)sel.value=String(n.summaryHour??8);sel.disabled=!n.summary;
+  const tz=n.tz||userTz;$('#nTz').textContent=tz?`${tz.replace(/_/g,' ')} time`:'';
+  $('#nMeta').textContent=!on?'Not connected':(S.notifyStatus||(n.enabled||n.summary?'On':'Off'));
+}
+function saveNotify(patch,message){act('settings',{notify:{...patch,tz:userTz,click:location.origin+location.pathname+'#alerts'},message});}
+$('#nForm').addEventListener('submit',e=>{e.preventDefault();const v=$('#nHook').value.trim();if(!v){toast('Paste the webhook link from Discord first.');return;}saveNotify({webhook:v});$('#nHook').value='';});
+$('#nRemove').onclick=()=>saveNotify({webhook:''});
+$('#nAlerts').onclick=()=>{const on=!S.settings.notify.enabled;saveNotify({enabled:on},on?'Alerts will post to Discord':'Alerts to Discord off');};
+$('#nSummary').onclick=()=>{const on=!S.settings.notify.summary;saveNotify({summary:on},on?'Daily summary on':'Daily summary off');};
+$('#nSev').addEventListener('click',e=>{const b=e.target.closest('[data-sev]');if(b&&!b.disabled)saveNotify({minSev:b.dataset.sev},b.dataset.sev==='critical'?'Only critical alerts will post':'High and critical alerts will post');});
+$('#nHour').addEventListener('change',e=>saveNotify({summaryHour:+e.target.value},'Summary will post at '+e.target.selectedOptions[0].textContent));
+$('#nTest').onclick=()=>act('notify-test',{});
+$('#autoblock').onclick=()=>act('settings',{autoblock:!S.settings?.autoblock});
+
+/* ---------- traffic chart ---------- */
+const cv=$('#traffic');let cctx,cw,ch;
+function sizeChart(){const r=cv.getBoundingClientRect();if(!r.width)return;const dpr=devicePixelRatio||1;cv.width=r.width*dpr;cv.height=r.height*dpr;cctx=cv.getContext('2d');cctx.setTransform(dpr,0,0,dpr,0,0);cw=r.width;ch=r.height;drawChart();}
+function niceMax(v){const e=Math.pow(10,Math.floor(Math.log10(v)));for(const m of [1,2,2.5,5,10])if(v<=m*e)return m*e;return 10*e;}
+function drawChart(){
+  if(!cctx||!S)return;const g=cctx;g.clearRect(0,0,cw,ch);
+  const rxA=S.traffic.rx||[],txA=S.traffic.tx||[];const N=Math.max(rxA.length,2);
+  const peak=Math.max(...rxA,...txA,0);const kb=peak<1;const f=kb?1000:1;const unit=kb?'kbps':'Mbps';
+  const max=niceMax(Math.max(peak*f*1.1,kb?10:1));
+  const L=44,R=12,T=10,B=10,W=cw-L-R,H=ch-T-B;const x=i=>L+i/(N-1)*W,y=v=>T+H-Math.min(v*f,max)/max*H;
+  g.font='12px "IBM Plex Mono",monospace';g.textAlign='right';g.textBaseline='middle';
+  for(let i=0;i<=4;i++){const v=max*i/4;const yy=T+H-i/4*H;g.strokeStyle=C.soft;g.lineWidth=1;g.beginPath();g.moveTo(L,yy);g.lineTo(L+W,yy);g.stroke();g.fillStyle=C.ink3;g.fillText(v>=10||v===0?Math.round(v):v.toFixed(1),L-10,yy);}
+  if(rxA.length<2)return;
+  const line=a=>{g.beginPath();a.forEach((v,i)=>i?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v)));};
+  const grad=g.createLinearGradient(0,T,0,T+H);grad.addColorStop(0,'rgba(69,198,230,.28)');grad.addColorStop(1,'rgba(69,198,230,.02)');
+  line(rxA);g.lineTo(x(rxA.length-1),T+H);g.lineTo(x(0),T+H);g.closePath();g.fillStyle=grad;g.fill();
+  line(rxA);g.strokeStyle=C.cyan;g.lineWidth=2;g.lineJoin='round';g.stroke();
+  line(txA);g.strokeStyle=C.violet;g.lineWidth=2;g.stroke();
+  [[rxA,C.cyan],[txA,C.violet]].forEach(([a,c])=>{g.beginPath();g.arc(x(a.length-1),y(a[a.length-1]),4.5,0,7);g.fillStyle=c;g.fill();});
+  const fmt=v=>{v*=f;return v>=10?Math.round(v):v.toFixed(1);};
+  $('#l-in').textContent=fmt(rxA.at(-1));$('#l-out').textContent=fmt(txA.at(-1));$('#l-unit').textContent=unit;$('#l-unit2').textContent=unit;
+}
+
+function renderAll(){
+  if(!S)return;
+  renderConn();renderThreat();renderOverview();renderAlerts();renderNetwork();renderRespond();renderNotify();renderDevices();
+}
+
+/* ---------------- boot ---------------- */
+(async()=>{
+  const startView=(location.hash||'').slice(1);
+  show(VIEWS.includes(startView)?startView:'overview',true);
+  new ResizeObserver(()=>{sizeChart();sizeMap();}).observe(mbox.parentElement);new ResizeObserver(()=>sizeChart()).observe(document.body);
+  document.fonts&&document.fonts.ready.then(()=>{sizeChart();sizeMap();});
+  requestAnimationFrame(frame);
+  if(await probe()){MODE='live';renderAll();setInterval(poll,3000);}
+  else{MODE='demo';S=Demo.snap();renderAll();setInterval(()=>{if(!paused){Demo.tick();S=Demo.snap();renderAll();}},2000);}
+  sizeChart();sizeMap();
+})();
+})();
+</script>
+
+<script>
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>

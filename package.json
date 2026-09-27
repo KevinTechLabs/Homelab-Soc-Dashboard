@@ -1,0 +1,42 @@
+{
+  "name": "sentinel",
+  "productName": "Sentinel",
+  "version": "1.5.1",
+  "description": "Homelab SOC dashboard and network threat monitor (Sentinel)",
+  "main": "main.js",
+  "author": "Kevin Marcotte",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win nsis portable",
+    "build:mac": "electron-builder --mac dmg",
+    "build:linux": "electron-builder --linux AppImage"
+  },
+  "build": {
+    "appId": "app.sentinel.console",
+    "productName": "Sentinel",
+    "files": [
+      "main.js",
+      "web/**/*"
+    ],
+    "win": {
+      "icon": "web/icons/icon.ico"
+    },
+    "mac": {
+      "icon": "web/icons/icon.png",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "icon": "web/icons/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  }
+}
