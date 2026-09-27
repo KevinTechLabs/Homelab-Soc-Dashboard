@@ -37,7 +37,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.5.2"
+VERSION = "1.5.3"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -205,9 +205,13 @@ class Store:
         if isinstance(dst, dict):
             self.settings["devices"].update(dst)
         self.devices = d.get("devices", {})
+        t0 = now_ms()
         for dv in self.devices.values():
-            dv["online"] = False
-            dv["missed"] = 2
+            # devices learned from the router's DHCP log stay online until they've been quiet for 3 hours;
+            # the server's own sweep re-checks the rest within 5 minutes of starting
+            recent = dv.get("via") == "router" and dv.get("online") and t0 - dv.get("last", 0) < 3 * 3600000
+            dv["online"] = bool(recent)
+            dv["missed"] = 0 if recent else 2
         self.tailnet = d.get("tailnet", {})
         self.geo = d.get("geo", {})
         self.gateway_mac = d.get("gateway_mac", "")
@@ -217,6 +221,8 @@ class Store:
         self.pf["edgeBlocked"] = set(d.get("pf_blocked", []))
         self.pf["sshOk"] = d.get("pf_ssh_ok")
         self.pf["nbrSeen"] = bool(d.get("pf_nbr_seen"))
+        self.pf["dhcpLast"] = int(d.get("pf_dhcp_last") or 0)
+        self.pf["lastLog"] = int(d.get("pf_last_log") or 0)
         bp = d.get("baseline_ports")
         self.baseline_ports = set(bp) if bp is not None else None
         st = d.get("settings", {})
@@ -243,6 +249,8 @@ class Store:
             "pf_blocked": sorted(self.pf["edgeBlocked"]),
             "pf_ssh_ok": self.pf.get("sshOk"),
             "pf_nbr_seen": self.pf.get("nbrSeen", False),
+            "pf_dhcp_last": self.pf.get("dhcpLast", 0),
+            "pf_last_log": self.pf.get("lastLog", 0),
             "settings": self.settings,
             "sources": [dict(s, users=sorted(s["users"])[:50], ports=sorted(s["ports"])[:50])
                         for s in self.sources.values()],
