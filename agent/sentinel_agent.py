@@ -17,8 +17,12 @@ POST requests need the access key from /etc/sentinel/token in the X-Sentinel-Key
 
 Standard library only. Listens on 127.0.0.1:8765; nginx forwards /api/ to it.
 """
+import base64
 import collections
+import getpass
+import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import os
@@ -27,17 +31,19 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.5.8"
+VERSION = "1.6.0"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -1990,6 +1996,329 @@ def tailscale_loop():
 
 
 # --------------------------------------------------------------------------- snapshot
+# --------------------------------------------------------------------------- Wazuh SIEM
+# Sentinel reads Wazuh (https://wazuh.com) over its own APIs on this server: alerts from the indexer
+# (read-only account) and agent status from the server API (read-only account). The two passwords live
+# only in /etc/sentinel/wazuh.json (root-only) and never reach the browser. Both connections use
+# certificate pinning: the SHA-256 of each certificate is recorded at setup and checked on every request.
+WAZUH_FILE = os.environ.get("SENTINEL_WAZUH_FILE", "/etc/sentinel/wazuh.json")
+WZ_DEFAULTS = {"indexer": "https://127.0.0.1:9200", "api": "https://127.0.0.1:55000", "dashboard": "",
+               "user": "", "password": "", "apiUser": "", "apiPassword": "", "pins": {}, "minLevel": 7}
+WZ = {"ok": None, "msg": "", "last": 0, "agents": [], "stats": {}, "vulns": {}, "cursor": "now-15m",
+      "seen": collections.deque(maxlen=4000), "token": "", "tokenAt": 0, "status": {}, "apiOk": None, "apiMsg": ""}
+
+
+class WzError(Exception):
+    pass
+
+
+def wz_conf():
+    try:
+        with open(WAZUH_FILE) as f:
+            return dict(WZ_DEFAULTS, **json.load(f))
+    except FileNotFoundError:
+        return None
+    except Exception as ex:
+        raise WzError("Couldn't read %s: %s" % (WAZUH_FILE, ex))
+
+
+def wz_cert(base, timeout=8):
+    """SHA-256 fingerprint of the certificate a Wazuh endpoint presents."""
+    u = urllib.parse.urlsplit(base)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((u.hostname, u.port or 443), timeout=timeout) as raw:
+        with ctx.wrap_socket(raw, server_hostname=u.hostname) as tls:
+            return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+
+
+def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None, timeout=20, pin=None):
+    u = urllib.parse.urlsplit(base)
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE   # self-signed; trust comes from the pinned fingerprint below
+    conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=ctx)
+    try:
+        conn.connect()
+        want = pin or (conf.get("pins") or {}).get(base)
+        got = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+        if not want:
+            raise WzError("No certificate recorded for %s. Run the Wazuh setup again." % base)
+        if not hmac.compare_digest(want, got):
+            raise WzError("The certificate at %s changed since setup. If you reinstalled Wazuh, run the setup again; "
+                          "otherwise something may be intercepting the connection." % base)
+        headers = {"Accept": "application/json", "User-Agent": "Sentinel/" + VERSION}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        if auth:
+            headers["Authorization"] = "Basic " + base64.b64encode(("%s:%s" % auth).encode()).decode()
+        elif token:
+            headers["Authorization"] = "Bearer " + token
+        conn.request(method, path, body=data, headers=headers)
+        r = conn.getresponse()
+        raw = r.read(8_000_000)
+        if r.status in (401, 403):
+            raise WzError("Wazuh refused the %s account (HTTP %d). Check the username, password and role." %
+                          ("indexer" if base == conf.get("indexer") else "API", r.status))
+        if r.status >= 400:
+            raise WzError("Wazuh answered HTTP %d: %s" % (r.status, raw[:160].decode("utf-8", "replace")))
+        return json.loads(raw or b"{}")
+    except (OSError, ssl.SSLError) as ex:
+        raise WzError("Can't reach %s (%s)." % (base, ex))
+    finally:
+        conn.close()
+
+
+def wz_search(conf, index, body):
+    return wz_request(conf["indexer"], "/%s/_search" % index, conf, "POST", body,
+                      auth=(conf["user"], conf["password"]))
+
+
+def wz_api(conf, path):
+    if not WZ["token"] or now_ms() - WZ["tokenAt"] > 10 * 60000:
+        r = wz_request(conf["api"], "/security/user/authenticate", conf, "POST",
+                       auth=(conf["apiUser"], conf["apiPassword"]))
+        WZ["token"], WZ["tokenAt"] = (r.get("data") or {}).get("token", ""), now_ms()
+    return wz_request(conf["api"], path, conf, token=WZ["token"])
+
+
+def wz_level_sev(lvl):
+    return "critical" if lvl >= 15 else "high" if lvl >= 12 else "medium" if lvl >= 7 else "low"
+
+
+def wz_time(ts):
+    try:
+        return int(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%f%z").timestamp() * 1000)
+    except Exception:
+        try:
+            return int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
+        except Exception:
+            return now_ms()
+
+
+def wz_link(conf, rule_id, agent_name):
+    base = (conf.get("dashboard") or "").rstrip("/")
+    if not base:
+        return ""
+    q = "rule.id:%s and agent.name:%s" % (rule_id, agent_name)
+    return base + "/app/threat-hunting#/overview/?tab=general&tabView=events&_q=(query:(language:kuery,query:'%s'))" % \
+        urllib.parse.quote(q, safe=":")
+
+
+def wz_alerts(conf):
+    body = {"size": 300, "sort": [{"timestamp": {"order": "asc"}}],
+            "_source": ["timestamp", "rule", "agent", "data.srcip", "data.srcuser", "data.dstuser",
+                        "data.win.eventdata.targetUserName", "id"],
+            "query": {"bool": {"filter": [{"range": {"rule.level": {"gte": int(conf.get("minLevel") or 7)}}},
+                                          {"range": {"timestamp": {"gte": WZ["cursor"]}}}]}}}
+    hits = (wz_search(conf, "wazuh-alerts-*", body).get("hits") or {}).get("hits") or []
+    new = 0
+    for h in hits:
+        src = h.get("_source") or {}
+        uid = h.get("_id") or src.get("id")
+        if uid in WZ["seen"]:
+            continue
+        WZ["seen"].append(uid)
+        WZ["cursor"] = src.get("timestamp") or WZ["cursor"]
+        rule, agent, data = src.get("rule") or {}, src.get("agent") or {}, src.get("data") or {}
+        lvl, rid = int(rule.get("level") or 0), str(rule.get("id") or "?")
+        aname, aid = agent.get("name") or "?", agent.get("id") or "?"
+        t = wz_time(src.get("timestamp", ""))
+        mitre = rule.get("mitre") or {}
+        tech = (mitre.get("id") or ["—"])[0]
+        tac = (mitre.get("tactic") or ["—"])[0]
+        ip = valid_ip(data.get("srcip")) if data.get("srcip") else None
+        user = data.get("srcuser") or data.get("dstuser") or ((data.get("win") or {}).get("eventdata") or {}).get("targetUserName")
+        desc = (rule.get("description") or "Wazuh alert").strip().replace("\\\\", "\\")
+        key = "wz:%s:%s:%d" % (rid, aid, hour(t))
+        with LOCK:
+            prev = S.alerts.get(key)
+            a = upsert_alert(key, wz_level_sev(lvl), ("Wazuh: " + desc)[:140], tech, tac,
+                             "%s on %s (Wazuh rule %s, level %d)" % (desc.rstrip("."), aname, rid, lvl),
+                             t, src=ip, user=user, count=(prev["count"] + 1) if prev else 1)
+            if not prev:
+                a["log"][0][1] = "Detected by Wazuh on %s (rule %s)" % (aname, rid)
+                a["host"] = aname
+            a["wz"] = {"rule": rid, "level": lvl, "agent": aname, "agentId": aid, "url": wz_link(conf, rid, aname)}
+            add_event(t, "wazuh", "%s · %s (rule %s)" % (aname, desc[:90], rid), "wazuh", hot=lvl >= 12)
+        new += 1
+    return new
+
+
+def wz_agents(conf):
+    r = wz_api(conf, "/agents?limit=500&select=id,name,ip,status,os.name,os.version,version,lastKeepAlive")
+    items = (r.get("data") or {}).get("affected_items") or []
+    out, t = [], now_ms()
+    for it in items:
+        aid, st = it.get("id"), it.get("status")
+        osd = it.get("os") or {}
+        ag = {"id": aid, "name": it.get("name"), "ip": it.get("ip"), "status": st,
+              "os": " ".join(x for x in (osd.get("name"), osd.get("version")) if x), "version": it.get("version"),
+              "lastKeepAlive": it.get("lastKeepAlive")}
+        out.append(ag)
+        if aid == "000":
+            continue
+        was = WZ["status"].get(aid)
+        WZ["status"][aid] = st
+        if was == "active" and st == "disconnected":
+            with LOCK:
+                upsert_alert("wz-agent:%s:%d" % (aid, hour(t)), "medium", "Wazuh agent stopped reporting",
+                             "T1562.001", "Defense Evasion",
+                             "%s (%s) stopped checking in with Wazuh. Make sure it's powered on and that nobody "
+                             "stopped or removed the agent" % (ag["name"], ag["ip"]), t, user=None)
+                add_event(t, "wazuh", "Agent %s disconnected" % ag["name"], "wazuh", hot=True)
+        elif was == "disconnected" and st == "active":
+            with LOCK:
+                add_event(t, "wazuh", "Agent %s reconnected" % ag["name"], "wazuh")
+    WZ["agents"] = out
+
+
+def wz_stats(conf):
+    body = {"size": 0, "query": {"range": {"timestamp": {"gte": "now-24h"}}},
+            "aggs": {"lv": {"range": {"field": "rule.level",
+                                       "ranges": [{"key": "critical", "from": 15}, {"key": "high", "from": 12, "to": 15},
+                                                  {"key": "medium", "from": 7, "to": 12}, {"key": "low", "to": 7}]}},
+                     "top": {"filter": {"range": {"rule.level": {"gte": 7}}},
+                             "aggs": {"r": {"terms": {"field": "rule.description", "size": 5}}}}}}
+    ag = wz_search(conf, "wazuh-alerts-*", body).get("aggregations") or {}
+    WZ["stats"] = {"levels": {b["key"]: b["doc_count"] for b in (ag.get("lv") or {}).get("buckets", [])},
+                   "top": [{"t": b["key"], "n": b["doc_count"]} for b in ((ag.get("top") or {}).get("r") or {}).get("buckets", [])]}
+    try:
+        vb = {"size": 0, "aggs": {"sev": {"terms": {"field": "vulnerability.severity", "size": 6}},
+                                  "pkg": {"terms": {"field": "package.name", "size": 5}},
+                                  "agent": {"terms": {"field": "agent.name", "size": 10}}}}
+        va = wz_search(conf, "wazuh-states-vulnerabilities-*", vb).get("aggregations") or {}
+        WZ["vulns"] = {k: [{"k": b["key"], "n": b["doc_count"]} for b in (va.get(k) or {}).get("buckets", [])]
+                       for k in ("sev", "pkg", "agent")}
+    except WzError:
+        WZ["vulns"] = {}
+
+
+WZ_CURSOR = os.path.join(STATE_DIR, "wazuh_cursor")
+
+
+def wazuh_loop():
+    last_slow = 0
+    try:
+        with open(WZ_CURSOR) as f:
+            WZ["cursor"] = f.read().strip() or WZ["cursor"]
+    except Exception:
+        pass
+    while True:
+        try:
+            conf = wz_conf()
+        except WzError as ex:
+            WZ["ok"], WZ["msg"] = False, str(ex)
+            conf = None
+        if conf and conf.get("user") and conf.get("password"):
+            try:
+                n = wz_alerts(conf)
+                WZ["ok"], WZ["msg"], WZ["last"] = True, "Connected", now_ms()
+                if n:
+                    S.dirty = True
+                    try:
+                        with open(WZ_CURSOR, "w") as f:
+                            f.write(WZ["cursor"])
+                    except Exception:
+                        pass
+            except WzError as ex:
+                WZ["ok"], WZ["msg"] = False, str(ex)
+            if now_ms() - last_slow > 5 * 60000:
+                last_slow = now_ms()
+                try:
+                    if conf.get("apiUser"):
+                        wz_agents(conf)
+                        WZ["apiOk"], WZ["apiMsg"] = True, "Connected"
+                except WzError as ex:
+                    WZ["apiOk"], WZ["apiMsg"], WZ["token"] = False, str(ex), ""
+                try:
+                    wz_stats(conf)
+                except WzError:
+                    pass
+        elif conf is None and WZ["ok"] is not False:
+            WZ["ok"], WZ["msg"] = None, ""
+        time.sleep(60)
+
+
+def wz_snapshot():
+    try:
+        conf = wz_conf()
+    except WzError:
+        conf = {}
+    return {"configured": bool(conf), "ok": WZ["ok"], "msg": WZ["msg"], "last": WZ["last"],
+            "apiOk": WZ["apiOk"], "apiMsg": WZ["apiMsg"], "agents": WZ["agents"], "stats": WZ["stats"],
+            "vulns": WZ["vulns"], "dashboard": (conf or {}).get("dashboard", ""),
+            "minLevel": (conf or {}).get("minLevel", 7)}
+
+
+def wazuh_setup():
+    """Interactive setup: sudo python3 /opt/sentinel/sentinel_agent.py --wazuh-setup"""
+    if os.geteuid() != 0:
+        sys.exit("Run this with sudo so the passwords can be stored in a root-only file.")
+    try:
+        old = wz_conf() or {}
+    except WzError:
+        old = {}
+    c = dict(WZ_DEFAULTS, **old)
+
+    def ask(label, key, secret=False):
+        cur = c.get(key) or ""
+        if secret:
+            v = getpass.getpass("%s%s: " % (label, " (Enter keeps the saved one)" if cur else ""))
+        else:
+            v = input("%s [%s]: " % (label, cur)).strip()
+        if v:
+            c[key] = v
+
+    lan = sorted(i for i in my_addresses() if not is_loopback(i) and ":" not in i and not i.startswith(("172.17.", "172.18.", "100.")))
+    if not c.get("dashboard") and lan:
+        c["dashboard"] = "https://%s:8443" % lan[0]
+    if not c.get("user"):
+        c["user"] = "sentinel"
+    if not c.get("apiUser"):
+        c["apiUser"] = "sentinel-api"
+    print("Sentinel ↔ Wazuh setup. Passwords are hidden while you type and stored only in %s (root-only).\n" % WAZUH_FILE)
+    ask("Wazuh dashboard address (for 'Open in Wazuh' links)", "dashboard")
+    ask("Indexer URL", "indexer")
+    ask("Read-only indexer user", "user")
+    ask("Password for that indexer user", "password", secret=True)
+    ask("Wazuh API URL", "api")
+    ask("Read-only API user", "apiUser")
+    ask("Password for that API user", "apiPassword", secret=True)
+    pins = {}
+    for base in (c["indexer"], c["api"]):
+        try:
+            fp = wz_cert(base)
+        except Exception as ex:
+            sys.exit("Can't reach %s: %s" % (base, ex))
+        pins[base] = fp
+        print("  Certificate for %s: SHA-256 %s" % (base, ":".join(fp[i:i + 2] for i in range(0, 16, 2)) + "…"))
+    c["pins"] = pins
+    try:
+        r = wz_search(c, "wazuh-alerts-*", {"size": 0, "track_total_hits": True,
+                                            "query": {"range": {"timestamp": {"gte": "now-24h"}}}})
+        print("  Indexer: OK, %s alerts in the last 24 hours." % ((r.get("hits") or {}).get("total") or {}).get("value", "?"))
+    except WzError as ex:
+        sys.exit("  Indexer: %s" % ex)
+    try:
+        WZ["token"] = ""
+        r = wz_api(c, "/agents?limit=500&select=id,name,status")
+        items = (r.get("data") or {}).get("affected_items") or []
+        print("  API: OK, %d agents (%s)." % (len(items), ", ".join("%s %s" % (i.get("name"), i.get("status")) for i in items)))
+    except WzError as ex:
+        sys.exit("  API: %s" % ex)
+    os.makedirs(os.path.dirname(WAZUH_FILE), exist_ok=True)
+    fd = os.open(WAZUH_FILE + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({k: c[k] for k in WZ_DEFAULTS}, f, indent=2)
+    os.replace(WAZUH_FILE + ".tmp", WAZUH_FILE)
+    os.chmod(WAZUH_FILE, 0o600)
+    print("\nSaved. Now run:  sudo systemctl restart sentinel-agent")
+
+
 def zone_summary():
     z = collections.OrderedDict()
     order = {name: i for i, (_, name) in enumerate(ZONES)}
@@ -2028,6 +2357,8 @@ def snapshot():
     except Exception:
         pass
     net = {k: v for k, v in S.net.items() if not k.startswith("_")}
+    wz_by_ip = {a["ip"]: {"id": a["id"], "name": a["name"], "status": a["status"]}
+                for a in WZ["agents"] if a.get("ip") and a.get("id") != "000"}
     net["newPerMin"] = len(S.new_conns)
     return {
         "mode": "live", "version": VERSION, "now": t,
@@ -2055,10 +2386,12 @@ def snapshot():
         "learning": S.learning,
         "lan": S.lan,
         "devices": sorted((dict({k: v for k, v in d.items() if k not in ("missed", "alerted")},
-                                zone=d.get("zone") or zone_of(d.get("ip", "")), reach=local_ip(d.get("ip", "")))
+                                zone=d.get("zone") or zone_of(d.get("ip", "")), reach=local_ip(d.get("ip", "")),
+                                wz=wz_by_ip.get(d.get("ip", "")))
                            for d in S.devices.values()),
                           key=lambda d: (not d.get("online"), d.get("ip", ""))),
         "zones": zone_summary(),
+        "wazuh": wz_snapshot(),
         "tailnet": sorted(S.tailnet.values(), key=lambda x: (not x.get("self"), not x.get("online"), x.get("name", ""))),
         "geo": {ip: S.geo[ip] for ip in {s["ip"] for s in sources} | {a["src"] for a in alerts} if ip in S.geo},
     }
@@ -2338,7 +2671,7 @@ def main():
     S.load()
     S.my_ips = my_addresses()
     for fn in (journal_loop, sampler_loop, saver_loop, notifier_loop, summary_loop,
-               geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop):
+               geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop, wazuh_loop):
         threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
     print("Sentinel agent %s listening on %s:%d" % (VERSION, BIND_HOST, BIND_PORT), flush=True)
@@ -2350,4 +2683,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--wazuh-setup" in sys.argv:
+        wazuh_setup()
+    else:
+        main()

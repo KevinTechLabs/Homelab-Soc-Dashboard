@@ -116,6 +116,19 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .tag.ok{color:var(--ok);background:var(--ok-bg);border-color:transparent}
 .tag.zone{color:var(--violet,#a98bfa);border-color:rgba(169,139,250,.35);background:transparent;text-transform:none;letter-spacing:0}
 .tag.bad{color:var(--crit);background:var(--crit-bg);border-color:transparent}
+.tag.wz{color:#6aa8ff;border-color:rgba(106,168,255,.4);background:transparent}
+.feed .ac.wazuh{color:#6aa8ff}
+.wzsev{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.wzsev div{background:var(--ground);border:1px solid var(--line-soft);border-radius:10px;padding:8px 10px;display:grid;gap:2px}
+.wzsev b{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.wzsev span{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.wzag{display:grid;gap:2px;margin-top:4px}
+.wzag .r{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:6px 2px;border-top:1px solid var(--line-soft)}
+.wzag .r:first-child{border-top:0}
+.wzag .r small{color:var(--ink-3);font-family:var(--mono);font-size:11.5px;margin-left:auto;white-space:nowrap}
+.wzag .r i{width:8px;height:8px;border-radius:50%;flex:none}
+.wzlink{color:var(--cyan);text-decoration:none;font-size:13px;font-weight:600}
+.wzlink:hover{text-decoration:underline}
 .st{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
 .st.new{color:var(--cyan)} .st.escalated{color:var(--crit)} .st.closed{color:var(--ink-3)}
 
@@ -349,6 +362,20 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
         <div class="cb"><div class="srv" id="server"></div></div>
       </div>
     </div>
+
+    <div class="two" id="wzRow" hidden>
+      <div class="card">
+        <div class="ch"><h3>Wazuh SIEM</h3><span class="meta" id="wzMeta"></span></div>
+        <div class="cb" style="display:grid;gap:12px">
+          <div class="wzsev" id="wzSev"></div>
+          <div class="wzag" id="wzAgents"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="ch"><h3>Vulnerabilities</h3><span class="meta" id="wzVulnMeta">from Wazuh</span></div>
+        <div class="cb" style="display:grid;gap:12px" id="wzVuln"></div>
+      </div>
+    </div>
   </section>
 
   <!-- ============ ALERTS ============ -->
@@ -470,6 +497,22 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
               </div>
               <p class="note" style="margin:0">Blocks go through pfSense's own <span class="mono">easyrule</span> command, so you can see and remove them under Firewall → Rules → WAN. This gives this server a key to your router's firewall; if it were ever hacked, the router could be changed too. Leave it off if that's a concern. The log view above works either way.</p>
             </div>
+          </div>
+        </div>
+        <div class="card" id="wzCard">
+          <div class="ch"><h3>Wazuh SIEM</h3><span class="meta" id="wzCardMeta"></span></div>
+          <div class="cb" style="display:grid;gap:12px">
+            <div class="rule"><span class="ck" id="wzIdxIcon">!</span><div class="rn"><b style="font-weight:600">Alerts from Wazuh</b><small id="wzIdxTxt"></small></div></div>
+            <div class="rule"><span class="ck" id="wzApiIcon">!</span><div class="rn"><b style="font-weight:600">Agent status</b><small id="wzApiTxt"></small></div></div>
+            <div class="setup" id="wzSetup">
+              <b style="color:var(--ink);font-weight:600">Connect Sentinel to Wazuh (read-only)</b>
+              <ol>
+                <li>In Wazuh, open <b style="color:var(--ink)">Indexer management → Security → Internal users</b> and create a user named <b style="color:var(--ink)">sentinel</b>. Then open <b style="color:var(--ink)">Roles → readall → Mapped users</b> and map <b style="color:var(--ink)">sentinel</b>.</li>
+                <li>Open <b style="color:var(--ink)">Server management → Security → Users</b>, create <b style="color:var(--ink)">sentinel-api</b>, and give it the <b style="color:var(--ink)">readonly</b> role.</li>
+                <li>On this server, run the setup and type the two passwords when asked:<div class="topic" style="margin-top:6px"><code id="wzCmd">sudo python3 /opt/sentinel/sentinel_agent.py --wazuh-setup</code><button class="btn" type="button" data-copy="wzCmd">Copy</button></div></li>
+              </ol>
+            </div>
+            <p class="note" style="margin:0">Both accounts are read-only, so Sentinel can see Wazuh but can't change it. The passwords stay in a root-only file on the server and never reach this page. Each connection is pinned to the certificate Wazuh showed during setup.</p>
           </div>
         </div>
         <div class="card">
@@ -687,6 +730,12 @@ const Demo=(()=>{
   for(let i=240;i>0;i--) step(now-i*10000);
   upsert('sf:198.51.100.77:labadmin:'+hour(now-1500000),'critical','Login succeeded after repeated failures','T1078','Initial Access','labadmin signed in from 198.51.100.77 after 4 failed attempts',now-1500000,'198.51.100.77','labadmin');
   upsert('port:3000','medium','New service listening on the network','T1543','Persistence','docker-proxy started listening on port 3000 (0.0.0.0)',now-2100000);
+  const WZD='https://10.20.1.10:8443';
+  const wz=(rid,lvl,aid,agent,sev,title,tech,tac,det,t,ip,user,count)=>{const a=upsert(`wz:${rid}:${aid}:${hour(t)}`,sev,'Wazuh: '+title,tech,tac,`${title} on ${agent} (Wazuh rule ${rid}, level ${lvl})`,t,ip,user,count);a.host=agent;a.log[0][1]=`Detected by Wazuh on ${agent} (rule ${rid})`;a.wz={rule:rid,level:lvl,agent,agentId:aid,url:`${WZD}/app/threat-hunting#/overview/`};ev(t,'wazuh',`${agent} · ${title} (rule ${rid})`,'wazuh',lvl>=12);return a;};
+  wz('550',7,'002','nexus-ai','medium','Integrity checksum changed','T1565.001','Impact','',now-1320000,null,null,2);
+  wz('60122',5,'001','desktop','low','Logon failure - Unknown user or bad password','T1078','Initial Access','',now-980000,null,'guest',3);
+  wz('92657',12,'001','desktop','high','Successful Remote Logon Detected - NTLM authentication, possible pass-the-hash attack','T1550.002','Lateral Movement','',now-420000,'10.20.40.100','labadmin',1);
+  wz('5710',5,'003','pi-hole','low','sshd: Attempt to login using a non-existent user','T1110.001','Credential Access','',now-300000,'10.20.40.100','test',4);
   let k=0; for(const a of alerts.values()){ if(k++%2===0 && a.sev!=='critical'){a.status='ack';a.owner='You';a.ackAt=a.time+ri(90,600)*1000;a.log.push([a.ackAt,'Acknowledged from the dashboard']);} }
   let cpu=18, tickN=0;
   function tick(){
@@ -708,7 +757,11 @@ const Demo=(()=>{
       events:events.slice(-150).reverse(),
       sources:Object.values(sources).sort((a,b)=>b.last-a.last).map(s=>({...s,edgeOnly:s.why==='Blocked by firewall'||s.why==='Port scanning',blockedAt:blocked.has(s.ip)?'router':'',users:[...s.users].slice(0,8),nusers:s.users.size,ports:[...s.ports].sort((a,b)=>a-b).slice(0,12),blocked:blocked.has(s.ip),why:s.why||'Suspicious activity'})),
       services,checks,net:{established:peers.length,peers,listening,protocols,newPerMin:ri(2,9)},
-      pfsense:{enabled:true,host:'',hostEffective:'10.20.1.1',user:'admin',iface:'wan',port:5140,sshOk:true,sshMsg:'Connected. Blocks apply to your whole network.',lastLog:t-ri(3,40)*1000,logs1h:ri(700,900),keyReady:true,pubkey:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyOnlyNotRealk8d0p2VqT7xYz sentinel@ai-lab'},settings:{autoblock:settings.autoblock,devices:{notifyNew:settings.devicesNotify!==false},notify:{...settings.notify}},notifyStatus,lan:{iface:'enp1s0',subnet:'10.20.1.0/24',scanner:'arp-scan',lastSweep:t-ri(20,200)*1000,gateway:'10.20.1.1'},devices:devices.map(d=>({...d,findings:[...d.findings]})),tailnet,geo:GEO,firewall:{ufw:'active',blocked:[...blocked]},learning:false};
+      wazuh:{configured:true,ok:true,msg:'Connected',last:t-ri(5,50)*1000,apiOk:true,apiMsg:'Connected',dashboard:'https://10.20.1.10:8443',minLevel:7,
+        agents:[{id:'000',name:'wazuh.manager',ip:'127.0.0.1',status:'active'},{id:'001',name:'desktop',ip:'10.20.1.101',status:'active',os:'Microsoft Windows 11 Home'},{id:'002',name:'nexus-ai',ip:'10.20.1.114',status:'active',os:'Ubuntu 26.04 LTS'},{id:'003',name:'pi-hole',ip:'10.20.1.20',status:'active',os:'Debian GNU/Linux 13'},{id:'004',name:'homelab',ip:'10.20.1.112',status:'active',os:'Ubuntu 25.04'}],
+        stats:{levels:{critical:0,high:3,medium:41,low:1268},top:[{t:'Integrity checksum changed',n:22},{t:'Windows logon success',n:12}]},
+        vulns:{sev:[{k:'Critical',n:2},{k:'High',n:14},{k:'Medium',n:57},{k:'Low',n:9}],pkg:[{k:'openssl',n:9},{k:'linux-image-generic',n:7},{k:'python3.13',n:5},{k:'Microsoft Edge',n:4},{k:'curl',n:3}],agent:[{k:'desktop',n:31},{k:'nexus-ai',n:24}]}},
+      pfsense:{enabled:true,host:'',hostEffective:'10.20.1.1',user:'admin',iface:'wan',port:5140,sshOk:true,sshMsg:'Connected. Blocks apply to your whole network.',lastLog:t-ri(3,40)*1000,logs1h:ri(700,900),keyReady:true,pubkey:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyOnlyNotRealk8d0p2VqT7xYz sentinel@ai-lab'},settings:{autoblock:settings.autoblock,devices:{notifyNew:settings.devicesNotify!==false},notify:{...settings.notify}},notifyStatus,lan:{iface:'enp1s0',subnet:'10.20.1.0/24',scanner:'arp-scan',lastSweep:t-ri(20,200)*1000,gateway:'10.20.1.1'},devices:devices.map(d=>({...d,findings:[...d.findings],wz:{'10.20.1.101':{id:'001',name:'desktop',status:'active'},'10.20.1.112':{id:'004',name:'homelab',status:'active'}}[d.ip]})),tailnet,geo:GEO,firewall:{ufw:'active',blocked:[...blocked]},learning:false};
   }
   function apply(path,body){
     const t=Date.now();
@@ -779,6 +832,33 @@ function renderOverview(){
    <div class="srv-foot"><span>Load <b>${(M.load||[]).map(x=>x.toFixed(2)).join(' · ')}</b></span><span><b>${cores}</b> cores</span>${S.learning?'<span>Learning normal activity</span>':''}</div>`;
   $('#trafficMeta').textContent=`${S.traffic.iface||'network'} · last 5 min`;
   drawChart();
+  renderWazuhOverview();
+}
+const WZSEV=[['critical','Critical',()=>C.crit],['high','High',()=>C.high],['medium','Medium',()=>C.med],['low','Low',()=>C.ink3]];
+function renderWazuhOverview(){
+  const W=S.wazuh;$('#wzRow').hidden=!(W&&W.configured);if(!W||!W.configured)return;
+  const ag=(W.agents||[]).filter(a=>a.id!=='000'),on=ag.filter(a=>a.status==='active').length;
+  $('#wzMeta').textContent=W.ok===false?'Not connected':`${on}/${ag.length} agents online · last 24 h`;
+  const L=(W.stats||{}).levels||{};
+  $('#wzSev').innerHTML=WZSEV.map(([k,n,c])=>`<div><b style="color:${(L[k]||0)&&k!=='low'?c():C.ink}">${(L[k]||0).toLocaleString()}</b><span>${n}</span></div>`).join('');
+  $('#wzAgents').innerHTML=ag.length?ag.map(a=>`<div class="r"><i style="background:${a.status==='active'?C.ok:a.status==='disconnected'?C.crit:C.ink3}"></i><b style="font-weight:600">${esc(a.name)}</b><span style="color:var(--ink-3);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.os||'')}</span><small>${esc(a.ip||'')}</small></div>`).join(''):'<p class="empty" style="padding:0">No agents reported yet.</p>';
+  const V=W.vulns||{},sev=V.sev||[],tot=sev.reduce((x,y)=>x+y.n,0);
+  const vc={Critical:C.crit,High:C.high,Medium:C.med,Low:C.ink3};
+  $('#wzVulnMeta').textContent=tot?`${tot.toLocaleString()} findings`:'from Wazuh';
+  $('#wzVuln').innerHTML=!tot?'<p class="empty" style="padding:0">No vulnerability data yet. Wazuh fills this in after its first scan.</p>':
+    `<div class="wzsev">${['Critical','High','Medium','Low'].map(k=>{const n=(sev.find(x=>x.k===k)||{}).n||0;return `<div><b style="color:${n&&k!=='Low'?vc[k]:C.ink}">${n}</b><span>${k}</span></div>`}).join('')}</div>`+
+    `<div><div class="meta" style="margin-bottom:6px">Most affected packages</div>${(V.pkg||[]).map(p=>`<div class="bar"><span class="k">${esc(p.k)}</span><span class="track"><span class="fill" style="width:${(p.n/Math.max(...V.pkg.map(x=>x.n))*100).toFixed(0)}%;background:${C.high}"></span></span><span class="v">${p.n}</span></div>`).join('')}</div>`+
+    (/^https:\/\//.test(W.dashboard||'')?`<a class="wzlink" href="${esc(W.dashboard)}/app/vulnerability-detection#/overview/" target="_blank" rel="noopener noreferrer">Open in Wazuh ↗</a>`:'');
+}
+function renderWazuhCard(){
+  const W=S.wazuh;$('#wzCard').hidden=!W;if(!W)return;
+  const set=(id,ok,txt)=>{const e=$(id+'Icon');e.className='ck '+(ok?'ok':ok===false?'bad':'');e.textContent=ok?'✓':ok===false?'✕':'!';$(id+'Txt').textContent=txt;};
+  if(!W.configured){$('#wzCardMeta').textContent='Not set up';set('#wzIdx',null,'Not set up yet');set('#wzApi',null,'Not set up yet');$('#wzSetup').hidden=false;return;}
+  $('#wzCardMeta').textContent=W.ok?'Connected':W.ok===false?'Problem':'Connecting…';
+  set('#wzIdx',W.ok,W.ok?`Level ${W.minLevel||7}+ alerts appear in Alerts · checked ${W.last?ago(W.last)+' ago':'just now'}`:W.ok===false?W.msg:'Waiting for the first check (up to a minute)…');
+  const ag=(W.agents||[]).filter(a=>a.id!=='000');
+  set('#wzApi',W.apiOk,W.apiOk?`${ag.filter(a=>a.status==='active').length} of ${ag.length} agents online. You'll get an alert if one stops reporting.`:W.apiOk===false?W.apiMsg:'Waiting for the first check (up to 5 minutes)…');
+  $('#wzSetup').hidden=!!(W.ok&&W.apiOk);
 }
 $('#attention').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(!b)return;openId=b.dataset.id;filter='open';document.querySelectorAll('#sevFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f==='open'));alertSig='';renderAlerts();show('alerts');const el=document.querySelector(`.al[data-id="${CSS.escape(openId)}"]`);el&&el.scrollIntoView({block:'center'});});
 
@@ -790,19 +870,20 @@ function alertCard(a,fresh){
   const o=a.id===openId, bl=blockedSet(), canBlock=isIP(a.src);
   return `<article class="al ${o?'open':''} ${fresh?'fresh':''} ${a.status==='closed'?'is-closed':''}" data-id="${esc(a.id)}">
     <button class="al-head" aria-expanded="${o}">
-      <span class="row1"><span class="sev ${a.sev}">${a.sev}</span><span class="st ${a.status}">${STATUS[a.status]||a.status}</span>${canBlock&&bl.has(a.src)?'<span class="tag ok">Source blocked</span>':''}</span>
+      <span class="row1"><span class="sev ${a.sev}">${a.sev}</span><span class="st ${a.status}">${STATUS[a.status]||a.status}</span>${a.wz?'<span class="tag wz">Wazuh</span>':''}${canBlock&&bl.has(a.src)?'<span class="tag ok">Source blocked</span>':''}</span>
       <span class="t">${esc(a.t)}</span>
       <span class="s">${esc([a.src!=='—'?a.src:null,a.user!=='—'?a.user:null,a.tech].filter(Boolean).join(' · '))}</span>
       <span class="side"><span class="tm">${hhmm(a.last)}</span>${a.count>1?`<span class="cnt">×${a.count}</span>`:''}</span>
     </button>
     ${o?`<div class="al-body">
       <p>${esc(a.det)}.</p>
-      <dl class="kv"><dt>ID</dt><dd>${esc(a.id)}</dd><dt>Tactic</dt><dd>${esc(a.tac)} · ${esc(a.tech)}</dd><dt>Host</dt><dd>${esc(a.host)}</dd><dt>Source</dt><dd>${esc(a.src)}${geoText(a.src)?'<br><span style="color:var(--ink-2)">'+esc(geoText(a.src))+'</span>':''}</dd><dt>User</dt><dd>${esc(a.user)}</dd><dt>First seen</dt><dd>${new Date(a.time).toLocaleString()}</dd><dt>Last seen</dt><dd>${new Date(a.last).toLocaleString()}</dd></dl>
+      <dl class="kv"><dt>ID</dt><dd>${esc(a.id)}</dd>${a.wz?`<dt>Wazuh</dt><dd>Rule ${esc(a.wz.rule)} · level ${esc(a.wz.level)} · ${esc(a.wz.agent)}</dd>`:''}<dt>Tactic</dt><dd>${esc(a.tac)} · ${esc(a.tech)}</dd><dt>Host</dt><dd>${esc(a.host)}</dd><dt>Source</dt><dd>${esc(a.src)}${geoText(a.src)?'<br><span style="color:var(--ink-2)">'+esc(geoText(a.src))+'</span>':''}</dd><dt>User</dt><dd>${esc(a.user)}</dd><dt>First seen</dt><dd>${new Date(a.time).toLocaleString()}</dd><dt>Last seen</dt><dd>${new Date(a.last).toLocaleString()}</dd></dl>
       <div class="actions">
         <button class="btn primary" data-act="ack" ${a.status!=='new'?'disabled':''}>Acknowledge</button>
         <button class="btn" data-act="escalate" ${a.status==='escalated'||a.status==='closed'?'disabled':''}>Escalate</button>
         ${canBlock?`<button class="btn ${bl.has(a.src)?'':'danger'}" data-act="${bl.has(a.src)?'unblock':'block'}">${bl.has(a.src)?'Unblock '+esc(a.src):'Block '+esc(a.src)}</button>`:''}
         ${a.status==='closed'?'<button class="btn ghost" data-act="reopen">Reopen</button>':'<button class="btn ghost" data-act="close">Close</button>'}
+        ${a.wz&&/^https:\/\//.test(a.wz.url||'')?`<a class="btn ghost" href="${esc(a.wz.url)}" target="_blank" rel="noopener noreferrer">Open in Wazuh ↗</a>`:''}
       </div>
       <ul class="timeline">${a.log.slice(-12).map(([t,m])=>`<li><span>${hhmmss(t)}</span><span>${esc(m)}</span></li>`).join('')}</ul>
     </div>`:''}
@@ -1059,6 +1140,7 @@ function renderNodeInfo(){
 
 /* ---------- respond ---------- */
 function renderRespond(){
+  renderWazuhCard();
   const t=S.now||Date.now();
   const list=(S.sources||[]).slice().sort((a,b)=>((a.blocked||a.edgeOnly)-(b.blocked||b.edgeOnly))||(b.last-a.last)).slice(0,12);
   $('#srcMeta').textContent=`${hostileActive()} active · ${(S.firewall?.blocked||[]).length} blocked`;
@@ -1108,7 +1190,7 @@ function devCard(d){
   const sub=[d.ip,d.vendor&&!d.vendor.startsWith('Private')?d.vendor:(d.vendor?'private address':''),d.host&&d.name?d.host:''].filter(Boolean).join(' · ');
   return `<article class="al dv ${o?'open':''}" data-mac="${esc(d.mac)}">
     <button class="al-head" aria-expanded="${o}">
-      <span class="row1"><span class="ddot" style="background:${d.online?C.ok:C.ink3}"></span><span class="st" style="color:${d.online?C.ok:C.ink3}">${d.online?'Online':'Offline · '+ago(d.last)}</span>${needsReview(d)?'<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">New</span>':''}${d.watch?'<span class="tag">Watched</span>':''}${d.self?'<span class="tag">This server</span>':''}${multiZone()&&d.zone?`<span class="tag zone">${esc(d.zone)}</span>`:''}</span>
+      <span class="row1"><span class="ddot" style="background:${d.online?C.ok:C.ink3}"></span><span class="st" style="color:${d.online?C.ok:C.ink3}">${d.online?'Online':'Offline · '+ago(d.last)}</span>${needsReview(d)?'<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">New</span>':''}${d.watch?'<span class="tag">Watched</span>':''}${d.self?'<span class="tag">This server</span>':''}${d.wz?`<span class="tag ${d.wz.status==='active'?'wz':'bad'}">${d.wz.status==='active'?'Wazuh agent':'Wazuh offline'}</span>`:''}${multiZone()&&d.zone?`<span class="tag zone">${esc(d.zone)}</span>`:''}</span>
       <span class="t">${esc(devLabel(d))}</span>
       <span class="s">${esc(sub)}</span>
       <span class="side">${w<=2&&risky.length?`<span class="sev ${LEVEL_CLASS[lvl]}">${LEVEL_TXT[lvl]}</span>`:(d.lastScan?'<span class="tag ok">No risky services</span>':'')}</span>

@@ -13,6 +13,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
 - **pfSense integration:** router firewall logs over syslog, device discovery in every VLAN from DHCP events, and optional network-wide blocking through pfSense `easyrule`.
 - **Network visibility:** device discovery (arp-scan, ping, pfSense DHCP), vendor lookup, risky-port checks per device, ARP-spoofing detection, and the Tailscale device list.
 - **Response actions:** block and unblock attackers (ufw on the server, or pfSense for the whole network), optional auto-block, alert acknowledge, escalate and close, and a one-click clear of the hostile-sources list (blocked addresses stay).
+- **Wazuh SIEM integration:** pulls Wazuh alerts (rule, agent, MITRE mapping, deep link), agent health and vulnerability counts through Wazuh's indexer and server APIs, using read-only accounts and certificate pinning. Alerts when an agent stops reporting (T1562.001).
 - **Discord notifications:** rate-limited alerts for high and critical events, plus a daily summary in your time zone.
 - **Runs anywhere you look:** a responsive web app (installable on phone and PC), a Windows app-window launcher, and an optional Electron desktop build.
 - **Secure by default:** the API listens on localhost behind nginx, actions need an access key, and the webhook is never sent to the browser.
@@ -27,6 +28,8 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
 |---|---|
 | ![Alerts](docs/screenshots/alerts.png) | ![Respond](docs/screenshots/respond.png) |
 
+![Wazuh SIEM and vulnerabilities on the Overview](docs/screenshots/wazuh.png)
+
 <p align="center"><img src="docs/screenshots/mobile.png" width="300" alt="Mobile view"></p>
 
 ## Architecture
@@ -40,6 +43,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
                                                           ├─ arp-scan / ping sweep, port checks
                                                           ├─ tailscale status --json
                                                           ├─ UDP 5140 ◄── pfSense syslog (firewall + DHCP)
+                                                          ├─ HTTPS (pinned) ──► Wazuh indexer :9200 + API :55000 (read-only, optional)
                                                           ├─ SSH ──► pfSense easyrule (optional)
                                                           └─ HTTPS ──► Discord webhook, ip-api.com (geo)
 ```
@@ -67,6 +71,8 @@ State lives in `/var/lib/sentinel/state.json`, and the access key in `/etc/senti
 | Risky service on a device (Telnet, TR-069, FTP, VNC, RDP, ADB, ...) | high / medium | T1021, T1133 | Lateral Movement / Initial Access |
 | New device joined the Tailscale network | high | T1078 | Initial Access |
 | Watched device went offline | medium | — | Impact |
+| Wazuh agent stopped reporting | medium | T1562.001 | Defense Evasion |
+| Any Wazuh alert level 7+ (Sysmon, auth, FIM, vulnerability, ...) | mapped from Wazuh level | from the Wazuh rule | from the Wazuh rule |
 
 Noise control: repeated events are grouped per source and hour. Router log lines are rolled up per attacker every 5 minutes. Late reply packets (TCP without SYN, UDP from DNS/QUIC/NTP servers) and one-off drops aren't counted as hostile sources.
 
@@ -100,6 +106,24 @@ If your network uses VLANs, give each subnet a friendly name. The Devices tab an
 sudo cp examples/zones.example.json /etc/sentinel/zones.json   # then edit it with your subnets
 sudo systemctl restart sentinel-agent
 ```
+
+## Wazuh SIEM (optional)
+
+If Wazuh runs on the same server, Sentinel shows its alerts, agents and vulnerabilities alongside its own detections. Create two **read-only** accounts in Wazuh:
+
+1. **Indexer management → Security → Internal users:** create `sentinel`, then map it to the `readall` role.
+2. **Server management → Security → Users:** create `sentinel-api` with the `readonly` role.
+3. On the server:
+   ```bash
+   sudo python3 /opt/sentinel/sentinel_agent.py --wazuh-setup   # prompts for both passwords (hidden)
+   sudo systemctl restart sentinel-agent
+   ```
+
+Design notes:
+- Credentials live only in `/etc/sentinel/wazuh.json` (mode 600) and never reach the browser.
+- Wazuh uses self-signed certificates, so the setup records each certificate's SHA-256 fingerprint and every request is checked against it (trust on first use). A changed certificate stops the integration instead of silently trusting it.
+- Alerts are read incrementally with a persisted cursor and de-duplicated by document ID, then grouped per rule, agent and hour so a noisy rule becomes one alert with a count.
+- Both accounts are read-only: Sentinel can see Wazuh but can't change it.
 
 ## Discord alerts
 
@@ -142,7 +166,7 @@ If the dashboard can't reach the agent, it runs in **demo mode** with simulated 
 
 ## Tech
 
-Python 3 (stdlib `http.server`, `subprocess`, `socket`), vanilla JavaScript and Canvas (no framework), nginx, systemd, ufw, journald, pfSense syslog/easyrule, the Discord webhook API, and the Tailscale CLI.
+Python 3 (stdlib `http.server`, `subprocess`, `socket`), vanilla JavaScript and Canvas (no framework), nginx, systemd, ufw, journald, pfSense syslog/easyrule, the Discord webhook API, the Wazuh indexer and server REST APIs, and the Tailscale CLI.
 
 ## Related
 
