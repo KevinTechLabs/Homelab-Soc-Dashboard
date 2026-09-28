@@ -43,7 +43,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.6.0"
+VERSION = "1.6.1"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -2163,12 +2163,16 @@ def wz_agents(conf):
             continue
         was = WZ["status"].get(aid)
         WZ["status"][aid] = st
-        if was == "active" and st == "disconnected":
+        watched = any(d.get("watch") and d.get("ip") == ag["ip"] for d in S.devices.values())
+        if was == "active" and st == "disconnected" and not watched:
+            with LOCK:
+                add_event(t, "wazuh", "Agent %s went offline" % ag["name"], "wazuh")
+        elif was == "active" and st == "disconnected":
             with LOCK:
                 upsert_alert("wz-agent:%s:%d" % (aid, hour(t)), "medium", "Wazuh agent stopped reporting",
                              "T1562.001", "Defense Evasion",
-                             "%s (%s) stopped checking in with Wazuh. Make sure it's powered on and that nobody "
-                             "stopped or removed the agent" % (ag["name"], ag["ip"]), t, user=None)
+                             "%s (%s) stopped checking in with Wazuh, and you asked to be told when it goes offline. "
+                             "Make sure it's powered on and that nobody stopped or removed the agent" % (ag["name"], ag["ip"]), t, user=None)
                 add_event(t, "wazuh", "Agent %s disconnected" % ag["name"], "wazuh", hot=True)
         elif was == "disconnected" and st == "active":
             with LOCK:
@@ -2273,7 +2277,11 @@ def wazuh_setup():
         if v:
             c[key] = v
 
-    lan = sorted(i for i in my_addresses() if not is_loopback(i) and ":" not in i and not i.startswith(("172.17.", "172.18.", "100.")))
+    # prefer the address on the default-route interface; skip Docker bridges (172.16/12) and Tailscale (100.64/10)
+    lan = [iface_cidr(default_iface() or "").split("/")[0]] if default_iface() and iface_cidr(default_iface() or "") else []
+    lan = [i for i in lan if i] or sorted(i for i in my_addresses() if not is_loopback(i) and ":" not in i
+                                          and not ipaddress.ip_address(i) in ipaddress.ip_network("172.16.0.0/12")
+                                          and not ipaddress.ip_address(i) in ipaddress.ip_network("100.64.0.0/10"))
     if not c.get("dashboard") and lan:
         c["dashboard"] = "https://%s:8443" % lan[0]
     if not c.get("user"):

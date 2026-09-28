@@ -127,6 +127,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .wzag .r:first-child{border-top:0}
 .wzag .r small{color:var(--ink-3);font-family:var(--mono);font-size:11.5px;margin-left:auto;white-space:nowrap}
 .wzag .r i{width:8px;height:8px;border-radius:50%;flex:none}
+a.btn{text-decoration:none;color:var(--ink);display:inline-flex;align-items:center}
 .wzlink{color:var(--cyan);text-decoration:none;font-size:13px;font-weight:600}
 .wzlink:hover{text-decoration:underline}
 .st{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
@@ -847,7 +848,7 @@ function renderWazuhOverview(){
   $('#wzVulnMeta').textContent=tot?`${tot.toLocaleString()} findings`:'from Wazuh';
   $('#wzVuln').innerHTML=!tot?'<p class="empty" style="padding:0">No vulnerability data yet. Wazuh fills this in after its first scan.</p>':
     `<div class="wzsev">${['Critical','High','Medium','Low'].map(k=>{const n=(sev.find(x=>x.k===k)||{}).n||0;return `<div><b style="color:${n&&k!=='Low'?vc[k]:C.ink}">${n}</b><span>${k}</span></div>`}).join('')}</div>`+
-    `<div><div class="meta" style="margin-bottom:6px">Most affected packages</div>${(V.pkg||[]).map(p=>`<div class="bar"><span class="k">${esc(p.k)}</span><span class="track"><span class="fill" style="width:${(p.n/Math.max(...V.pkg.map(x=>x.n))*100).toFixed(0)}%;background:${C.high}"></span></span><span class="v">${p.n}</span></div>`).join('')}</div>`+
+    `<div><div class="meta" style="margin-bottom:6px">Most affected packages</div>${(V.pkg||[]).map(p=>`<div class="bar"><span class="k" title="${esc(p.k)}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.k)}</span><span class="track"><span class="fill" style="width:${(p.n/Math.max(...V.pkg.map(x=>x.n))*100).toFixed(0)}%;background:${C.high}"></span></span><span class="v">${p.n}</span></div>`).join('')}</div>`+
     (/^https:\/\//.test(W.dashboard||'')?`<a class="wzlink" href="${esc(W.dashboard)}/app/vulnerability-detection#/overview/" target="_blank" rel="noopener noreferrer">Open in Wazuh ↗</a>`:'');
 }
 function renderWazuhCard(){
@@ -855,9 +856,9 @@ function renderWazuhCard(){
   const set=(id,ok,txt)=>{const e=$(id+'Icon');e.className='ck '+(ok?'ok':ok===false?'bad':'');e.textContent=ok?'✓':ok===false?'✕':'!';$(id+'Txt').textContent=txt;};
   if(!W.configured){$('#wzCardMeta').textContent='Not set up';set('#wzIdx',null,'Not set up yet');set('#wzApi',null,'Not set up yet');$('#wzSetup').hidden=false;return;}
   $('#wzCardMeta').textContent=W.ok?'Connected':W.ok===false?'Problem':'Connecting…';
-  set('#wzIdx',W.ok,W.ok?`Level ${W.minLevel||7}+ alerts appear in Alerts · checked ${W.last?ago(W.last)+' ago':'just now'}`:W.ok===false?W.msg:'Waiting for the first check (up to a minute)…');
+  set('#wzIdx',W.ok,W.ok?`Level ${W.minLevel||7}+ alerts appear in Alerts · checked ${W.last?ago(W.last):'just now'}`:W.ok===false?W.msg:'Waiting for the first check (up to a minute)…');
   const ag=(W.agents||[]).filter(a=>a.id!=='000');
-  set('#wzApi',W.apiOk,W.apiOk?`${ag.filter(a=>a.status==='active').length} of ${ag.length} agents online. You'll get an alert if one stops reporting.`:W.apiOk===false?W.apiMsg:'Waiting for the first check (up to 5 minutes)…');
+  set('#wzApi',W.apiOk,W.apiOk?`${ag.filter(a=>a.status==='active').length} of ${ag.length} agents online. Devices you mark \u201cAlert me if it goes offline\u201d raise an alert if their agent stops reporting.`:W.apiOk===false?W.apiMsg:'Waiting for the first check (up to 5 minutes)…');
   $('#wzSetup').hidden=!!(W.ok&&W.apiOk);
 }
 $('#attention').addEventListener('click',e=>{const b=e.target.closest('[data-id]');if(!b)return;openId=b.dataset.id;filter='open';document.querySelectorAll('#sevFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.f==='open'));alertSig='';renderAlerts();show('alerts');const el=document.querySelector(`.al[data-id="${CSS.escape(openId)}"]`);el&&el.scrollIntoView({block:'center'});});

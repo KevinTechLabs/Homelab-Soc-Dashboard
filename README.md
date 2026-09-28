@@ -13,7 +13,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
 - **pfSense integration:** router firewall logs over syslog, device discovery in every VLAN from DHCP events, and optional network-wide blocking through pfSense `easyrule`.
 - **Network visibility:** device discovery (arp-scan, ping, pfSense DHCP), vendor lookup, risky-port checks per device, ARP-spoofing detection, and the Tailscale device list.
 - **Response actions:** block and unblock attackers (ufw on the server, or pfSense for the whole network), optional auto-block, alert acknowledge, escalate and close, and a one-click clear of the hostile-sources list (blocked addresses stay).
-- **Wazuh SIEM integration:** pulls Wazuh alerts (rule, agent, MITRE mapping, deep link), agent health and vulnerability counts through Wazuh's indexer and server APIs, using read-only accounts and certificate pinning. Alerts when an agent stops reporting (T1562.001).
+- **Wazuh SIEM integration:** pulls Wazuh alerts (rule, agent, MITRE mapping, deep link), agent health and vulnerability counts through Wazuh's indexer and server APIs, using read-only accounts and certificate pinning. Alerts when a watched device's agent stops reporting (T1562.001); agents on machines you switch off just log a line.
 - **Discord notifications:** rate-limited alerts for high and critical events, plus a daily summary in your time zone.
 - **Runs anywhere you look:** a responsive web app (installable on phone and PC), a Windows app-window launcher, and an optional Electron desktop build.
 - **Secure by default:** the API listens on localhost behind nginx, actions need an access key, and the webhook is never sent to the browser.
