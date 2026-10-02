@@ -10,7 +10,8 @@ Serves: GET  /api/state      one JSON snapshot for the dashboard
         POST /api/unblock    {"ip": "..."}
         POST /api/settings   {"autoblock": bool, "notify": {...}}
         POST /api/notify-test post a test message to your Discord channel
-        POST /api/device     {"mac": "...", "action": "rename|known|watch|scan|forget", ...}
+        POST /api/device     {"mac": "...", "action": "rename|known|watch|scan|merge|forget", ...}
+        POST /api/devices-cleanup   remove offline devices not marked as yours
         POST /api/lan-sweep  look for devices on the home network now
         POST /api/pfsense    {"action": "save|test|key|disconnect", ...}  pfSense router link
 POST requests need the access key from /etc/sentinel/token in the X-Sentinel-Key header.
@@ -43,7 +44,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.6.1"
+VERSION = "1.6.2"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -1764,6 +1765,46 @@ def dev_label(d):
     return (v + " device") if v and not v.startswith("Private") else ("Unknown device" if not v else "Phone or laptop")
 
 
+def private_mac(mac):
+    """Randomized ("private") hardware address: phones and laptops rotate these per network."""
+    h = (mac or "").replace(":", "").replace("-", "")
+    try:
+        return len(h) >= 2 and bool(int(h[1], 16) & 2)
+    except ValueError:
+        return False
+
+
+SAME_SLACK = 10 * 60000   # sweeps are 5 minutes apart, so allow a little overlap
+
+
+def same_device_hint(d):
+    """A new device that is probably one of yours back with a new private address.
+    Needs ALL of: both addresses private, same network name, same zone, the old one marked
+    as yours (or named) and offline, and the two never online at the same time.
+    Only a suggestion: nothing is merged until you confirm it."""
+    if d.get("known") or d.get("self") or not private_mac(d.get("mac")):
+        return None
+    host = (d.get("host") or "").strip().lower()
+    if not host:
+        return None
+    zone = d.get("zone") or zone_of(d.get("ip", ""))
+    best = None
+    for o in S.devices.values():
+        if o is d or o.get("online") or not private_mac(o.get("mac")):
+            continue
+        if not (o.get("known") or o.get("name")):
+            continue
+        if (o.get("host") or "").strip().lower() != host:
+            continue
+        if (o.get("zone") or zone_of(o.get("ip", ""))) != zone:
+            continue
+        if o.get("last", 0) > d.get("first", 0) + SAME_SLACK:
+            continue   # both were around at once, so they're two devices
+        if best is None or o.get("last", 0) > best.get("last", 0):
+            best = o
+    return {"mac": best["mac"], "label": dev_label(best)} if best else None
+
+
 def local_ip(ip):
     """True when ip is on the same network as this server, so Sentinel can reach it directly."""
     try:
@@ -2395,7 +2436,7 @@ def snapshot():
         "lan": S.lan,
         "devices": sorted((dict({k: v for k, v in d.items() if k not in ("missed", "alerted")},
                                 zone=d.get("zone") or zone_of(d.get("ip", "")), reach=local_ip(d.get("ip", "")),
-                                wz=wz_by_ip.get(d.get("ip", "")))
+                                wz=wz_by_ip.get(d.get("ip", "")), same=same_device_hint(d))
                            for d in S.devices.values()),
                           key=lambda d: (not d.get("online"), d.get("ip", ""))),
         "zones": zone_summary(),
@@ -2616,6 +2657,18 @@ class Handler(BaseHTTPRequestHandler):
                     add_event(t, "INFO", "Hostile sources list cleared from the dashboard (%d removed)" % len(gone), "system")
                     return self._send(200, {"ok": True, "message": ("Cleared %d source%s. Blocked addresses stay listed." % (len(gone), "" if len(gone) == 1 else "s")) if gone else "Nothing to clear."})
                 return self._send(400, {"error": "Unknown action"})
+            if path == "/api/devices-cleanup":
+                gone = [m for m, d in S.devices.items()
+                        if not d.get("online") and not d.get("known") and not d.get("self")
+                        and not d.get("watch") and not d.get("gateway")]
+                for m in gone:
+                    del S.devices[m]
+                if gone:
+                    S.dirty = True
+                    add_event(t, "INFO", "Removed %d offline device%s not marked as yours (from the dashboard)"
+                              % (len(gone), "" if len(gone) == 1 else "s"), "system")
+                return self._send(200, {"ok": True, "message": ("Removed %d offline device%s. If one comes back it will show up as new." %
+                                                                (len(gone), "" if len(gone) == 1 else "s")) if gone else "Nothing to remove."})
             if path == "/api/lan-sweep":
                 DEV_EVT.set()
                 return self._send(200, {"ok": True, "message": "Scanning your network. New devices show up in about a minute."})
@@ -2646,6 +2699,24 @@ class Handler(BaseHTTPRequestHandler):
                     d["scanNow"] = True
                     SCAN_EVT.set()
                     msg = "Checking %s for risky services. Results in about a minute." % label
+                elif act == "merge":
+                    hint = same_device_hint(d)   # re-checked here; the browser's suggestion isn't trusted
+                    old = S.devices.get(hint["mac"]) if hint else None
+                    if not old:
+                        return self._send(400, {"error": "Sentinel can't match this to one of your devices anymore."})
+                    for k in ("name", "known", "watch"):
+                        if old.get(k):
+                            d[k] = old[k]
+                    d["first"] = min(d.get("first", t), old.get("first", t))
+                    if old.get("baseline"):
+                        d["baseline"] = True
+                    a = S.alerts.get("newdev:%s" % mac)
+                    if a and a["status"] != "closed":
+                        a["status"], a["ackAt"] = "closed", a["ackAt"] or t
+                        a["log"].append([t, "Closed: same device as %s with a new private address" % hint["label"]])
+                    del S.devices[old["mac"]]
+                    add_event(t, "INFO", "%s is back with a new private address (%s, was %s). Merged." % (hint["label"], mac, old["mac"]), "system")
+                    msg = "Merged. This is %s now." % dev_label(d)
                 elif act == "forget":
                     del S.devices[mac]
                     msg = "%s removed. If it's still on your network it will show up again as new." % label

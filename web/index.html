@@ -47,6 +47,10 @@
 [hidden]{display:none!important}
 html,body{background:var(--ground)}
 body{margin:0}
+.bulk{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px;padding:12px 16px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--ink-2);font-size:14px}
+.bulk .btn{flex:none}
+.same{margin:0 0 12px;padding:12px 14px;border:1px solid rgba(69,198,230,.35);border-radius:12px;background:rgba(69,198,230,.07)}
+.same p{margin:0 0 10px}
 body{color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:0 calc(var(--nav-h) + 28px + env(safe-area-inset-bottom,0px));-webkit-font-smoothing:antialiased}
 .wrap{max-width:1180px;margin:0 auto}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -442,6 +446,7 @@ a.btn{text-decoration:none;color:var(--ink);display:inline-flex;align-items:cent
       <button class="chip" data-f="offline" aria-pressed="false">Offline<b id="df-offline"></b></button>
     </div>
     <div class="filters" id="zoneFilter" hidden></div>
+    <div class="bulk" id="devBulk" hidden></div>
     <div class="alist" id="devList"></div>
     <div class="two">
       <div class="card">
@@ -671,7 +676,9 @@ const Demo=(()=>{
     {mac:'a4:2b:b0:11:22:01',ip:'10.20.1.1',vendor:'TP-LINK TECHNOLOGIES',host:'',gateway:true,known:true,findings:[F(53,'info','DNS',''),F(80,'info','Web admin page (not encrypted)','If this is a router, camera or printer, change the default admin password.'),F(443,'info','Web page (encrypted)','')]},
     {mac:'04:d9:f5:11:22:02',ip:'10.20.1.101',vendor:'ASUSTek COMPUTER',host:'desktop.lan',known:true,findings:[F(3389,'medium','Remote Desktop is open','Fine for your own PC on your home network. Use a strong password and keep Windows updated.'),F(445,'low','File sharing (SMB) is open','Normal for PCs and NAS drives. Make sure guest access is off and it isn’t forwarded from your router.')]},
     {mac:'4c:de:11:22:33:03',ip:'10.20.1.112',vendor:'Micro-Star INTL',host:'',self:true,known:true,findings:[]},
-    {mac:'da:3f:11:22:33:04',ip:'10.20.1.31',vendor:'Private address (phone, tablet or laptop)',host:'Phone.lan',known:true,findings:[F(62078,'info','Apple device sync','')]},
+    {mac:'da:3f:11:22:33:04',ip:'10.20.1.31',vendor:'Private address (phone, tablet or laptop)',host:'Phone.lan',name:'My phone',known:true,online:false,findings:[F(62078,'info','Apple device sync','')]},
+    {mac:'f2:3f:11:22:33:13',ip:'10.20.1.33',vendor:'Private address (phone, tablet or laptop)',host:'Phone.lan',known:false,first:t0-1800000,baseline:false,findings:[F(62078,'info','Apple device sync','')]},
+    {mac:'ae:3f:11:22:33:14',ip:'10.20.1.34',vendor:'Private address (phone, tablet or laptop)',host:'Phone.lan',known:false,online:false,findings:[]},
     {mac:'58:fd:b1:22:33:05',ip:'10.20.1.50',vendor:'LG Electronics',host:'LGwebOSTV.lan',known:true,findings:[F(8008,'info','Chromecast / Google Cast','')]},
     {mac:'9c:8e:cd:22:33:06',ip:'10.20.1.60',vendor:'Amcrest Technologies',host:'',known:false,watch:true,findings:[F(23,'high','Telnet is open','Telnet sends passwords in plain text and is the favourite way in for botnets like Mirai. Turn it off in the device’s settings or update its firmware. If you can’t, consider replacing the device.'),F(554,'low','Camera video stream (RTSP) is open','Normal for cameras. Make sure the camera doesn’t use its default password.'),F(80,'info','Web admin page (not encrypted)','')]},
     {mac:'68:54:fd:22:33:07',ip:'10.20.1.70',vendor:'Amazon Technologies',host:'',known:true,findings:[]},
@@ -681,6 +688,15 @@ const Demo=(()=>{
     {mac:'ec:fa:bc:22:33:11',ip:'10.20.1.144',vendor:'Espressif Inc.',host:'',known:false,findings:[F(1883,'medium','Smart-home messaging (MQTT) is open without encryption','Make sure your MQTT broker requires a username and password.'),F(80,'info','Web admin page (not encrypted)','')]},
     {mac:'00:17:88:22:33:12',ip:'10.20.1.95',vendor:'Philips Lighting',host:'',known:true,online:false,findings:[F(80,'info','Web admin page (not encrypted)',''),F(443,'info','Web page (encrypted)','')]},
   ].map(d=>({name:'',first:t0-9*86400000,last:d.online===false?t0-7200000:t0,online:d.online!==false,watch:!!d.watch,ports:d.findings.map(f=>f.port),lastScan:d.self?0:t0-ri(20,300)*60000,baseline:true,...d}));
+  const privMac=m=>!!(parseInt((m||'').replace(/[:-]/g,'')[1],16)&2);
+  function sameHint(d){
+    if(d.known||d.self||!privMac(d.mac)||!d.host)return null;
+    let best=null;
+    devices.forEach(o=>{if(o===d||o.online||!privMac(o.mac)||!(o.known||o.name))return;
+      if((o.host||'').toLowerCase()!==d.host.toLowerCase())return;if(o.last>d.first+600000)return;
+      if(!best||o.last>best.last)best=o;});
+    return best?{mac:best.mac,label:best.name||best.host}:null;
+  }
   const tailnet=[{id:'1',name:'homelab',os:'linux',ips:['100.64.0.10'],online:true,self:true},{id:'2',name:'phone',os:'iOS',ips:['100.64.0.11'],online:true},{id:'3',name:'desktop',os:'windows',ips:['100.64.0.12'],online:true},{id:'4',name:'laptop',os:'macOS',ips:['100.64.0.13'],online:false}];
   function mkPeers(){
     const base=[{ip:'10.20.1.20',port:51234,lport:22,dir:'in',svc:'SSH',lan:true},{ip:'10.20.1.31',port:60311,lport:8088,dir:'in',svc:'Sentinel',lan:true},{ip:'10.20.1.20',port:52110,lport:3000,dir:'in',svc:'Web app',lan:true},{ip:'100.64.0.11',port:41641,lport:41641,dir:'in',svc:'Tailscale',lan:true}];
@@ -762,7 +778,7 @@ const Demo=(()=>{
         agents:[{id:'000',name:'wazuh.manager',ip:'127.0.0.1',status:'active'},{id:'001',name:'desktop',ip:'10.20.1.101',status:'active',os:'Microsoft Windows 11 Home'},{id:'002',name:'nexus-ai',ip:'10.20.1.114',status:'active',os:'Ubuntu 26.04 LTS'},{id:'003',name:'pi-hole',ip:'10.20.1.20',status:'active',os:'Debian GNU/Linux 13'},{id:'004',name:'homelab',ip:'10.20.1.112',status:'active',os:'Ubuntu 25.04'}],
         stats:{levels:{critical:0,high:3,medium:41,low:1268},top:[{t:'Integrity checksum changed',n:22},{t:'Windows logon success',n:12}]},
         vulns:{sev:[{k:'Critical',n:2},{k:'High',n:14},{k:'Medium',n:57},{k:'Low',n:9}],pkg:[{k:'openssl',n:9},{k:'linux-image-generic',n:7},{k:'python3.13',n:5},{k:'Microsoft Edge',n:4},{k:'curl',n:3}],agent:[{k:'desktop',n:31},{k:'nexus-ai',n:24}]}},
-      pfsense:{enabled:true,host:'',hostEffective:'10.20.1.1',user:'admin',iface:'wan',port:5140,sshOk:true,sshMsg:'Connected. Blocks apply to your whole network.',lastLog:t-ri(3,40)*1000,logs1h:ri(700,900),keyReady:true,pubkey:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyOnlyNotRealk8d0p2VqT7xYz sentinel@ai-lab'},settings:{autoblock:settings.autoblock,devices:{notifyNew:settings.devicesNotify!==false},notify:{...settings.notify}},notifyStatus,lan:{iface:'enp1s0',subnet:'10.20.1.0/24',scanner:'arp-scan',lastSweep:t-ri(20,200)*1000,gateway:'10.20.1.1'},devices:devices.map(d=>({...d,findings:[...d.findings],wz:{'10.20.1.101':{id:'001',name:'desktop',status:'active'},'10.20.1.112':{id:'004',name:'homelab',status:'active'}}[d.ip]})),tailnet,geo:GEO,firewall:{ufw:'active',blocked:[...blocked]},learning:false};
+      pfsense:{enabled:true,host:'',hostEffective:'10.20.1.1',user:'admin',iface:'wan',port:5140,sshOk:true,sshMsg:'Connected. Blocks apply to your whole network.',lastLog:t-ri(3,40)*1000,logs1h:ri(700,900),keyReady:true,pubkey:'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyOnlyNotRealk8d0p2VqT7xYz sentinel@ai-lab'},settings:{autoblock:settings.autoblock,devices:{notifyNew:settings.devicesNotify!==false},notify:{...settings.notify}},notifyStatus,lan:{iface:'enp1s0',subnet:'10.20.1.0/24',scanner:'arp-scan',lastSweep:t-ri(20,200)*1000,gateway:'10.20.1.1'},devices:devices.map(d=>({...d,same:sameHint(d),findings:[...d.findings],wz:{'10.20.1.101':{id:'001',name:'desktop',status:'active'},'10.20.1.112':{id:'004',name:'homelab',status:'active'}}[d.ip]})),tailnet,geo:GEO,firewall:{ufw:'active',blocked:[...blocked]},learning:false};
   }
   function apply(path,body){
     const t=Date.now();
@@ -781,7 +797,9 @@ const Demo=(()=>{
       if(body.action==='known'){d.known=body.value;return{message:(body.value?'Marked as yours':'Marked as not yours')};}
       if(body.action==='watch'){d.watch=body.value;return{message:body.value?'Watching it. You\u2019ll get an alert if it goes offline.':'Stopped watching'};}
       if(body.action==='scan'){d.lastScan=Date.now();return{message:'Checking it for risky services. Results in about a minute.'};}
+      if(body.action==='merge'){const h=sameHint(d),o=h&&devices.find(x=>x.mac===h.mac);if(!o)return{error:'Sentinel can\u2019t match this to one of your devices anymore.'};['name','known','watch'].forEach(k=>{if(o[k])d[k]=o[k];});d.first=Math.min(d.first,o.first);devices.splice(devices.indexOf(o),1);return{message:'Merged. This is '+d.name+' now.'};}
       if(body.action==='forget'){devices.splice(devices.indexOf(d),1);return{message:'Removed from the list. If it\u2019s still on your network it will show up again as new.'};}}
+    if(path==='devices-cleanup'){const g=devices.filter(d=>!d.online&&!d.known&&!d.self&&!d.watch&&!d.gateway);g.forEach(d=>devices.splice(devices.indexOf(d),1));return{message:g.length?`Removed ${g.length} offline device${g.length>1?'s':''}. If one comes back it will show up as new.`:'Nothing to remove.'};}
     if(path==='settings'&&body.devices){settings.devicesNotify=!!body.devices.notifyNew;return{message:'New-device posts to Discord '+(settings.devicesNotify?'on':'off')};}
     if(path==='notify-test'){notifyStatus='Test sent at '+hhmm(Date.now())+' (demo)';return{message:'In the demo nothing is sent. On your server this posts to your Discord channel.'};}
     return{error:'Unknown action'};
@@ -1191,12 +1209,13 @@ function devCard(d){
   const sub=[d.ip,d.vendor&&!d.vendor.startsWith('Private')?d.vendor:(d.vendor?'private address':''),d.host&&d.name?d.host:''].filter(Boolean).join(' · ');
   return `<article class="al dv ${o?'open':''}" data-mac="${esc(d.mac)}">
     <button class="al-head" aria-expanded="${o}">
-      <span class="row1"><span class="ddot" style="background:${d.online?C.ok:C.ink3}"></span><span class="st" style="color:${d.online?C.ok:C.ink3}">${d.online?'Online':'Offline · '+ago(d.last)}</span>${needsReview(d)?'<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">New</span>':''}${d.watch?'<span class="tag">Watched</span>':''}${d.self?'<span class="tag">This server</span>':''}${d.wz?`<span class="tag ${d.wz.status==='active'?'wz':'bad'}">${d.wz.status==='active'?'Wazuh agent':'Wazuh offline'}</span>`:''}${multiZone()&&d.zone?`<span class="tag zone">${esc(d.zone)}</span>`:''}</span>
+      <span class="row1"><span class="ddot" style="background:${d.online?C.ok:C.ink3}"></span><span class="st" style="color:${d.online?C.ok:C.ink3}">${d.online?'Online':'Offline · '+ago(d.last)}</span>${needsReview(d)?'<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">New</span>':''}${d.same?`<span class="tag" style="color:var(--cyan);border-color:rgba(69,198,230,.35)">${esc(d.same.label)}?</span>`:''}${d.watch?'<span class="tag">Watched</span>':''}${d.self?'<span class="tag">This server</span>':''}${d.wz?`<span class="tag ${d.wz.status==='active'?'wz':'bad'}">${d.wz.status==='active'?'Wazuh agent':'Wazuh offline'}</span>`:''}${multiZone()&&d.zone?`<span class="tag zone">${esc(d.zone)}</span>`:''}</span>
       <span class="t">${esc(devLabel(d))}</span>
       <span class="s">${esc(sub)}</span>
       <span class="side">${w<=2&&risky.length?`<span class="sev ${LEVEL_CLASS[lvl]}">${LEVEL_TXT[lvl]}</span>`:(d.lastScan?'<span class="tag ok">No risky services</span>':'')}</span>
     </button>
     ${o?`<div class="al-body">
+      ${d.same?`<div class="same"><p>This looks like <b>${esc(d.same.label)}</b> back with a new private address. Phones set to a rotating private Wi-Fi address show up as a new device each time the address changes.</p><button class="btn primary" data-da="merge">Same device: merge into ${esc(d.same.label)}</button></div>`:''}
       ${risky.length?`<ul class="fnd">${risky.map(f=>`<li><span class="sev ${LEVEL_CLASS[f.level]}">${f.level}</span><b>${esc(f.title)} <span class="mono" style="color:var(--ink-3);font-weight:400">:${f.port}</span></b><p>${esc(f.advice)}</p></li>`).join('')}</ul>`:`<p>${d.self?'This server is covered by the other tabs.':d.reach===false?`It’s in ${esc(d.zone||'another zone')}, and pfSense keeps this server from reaching it, so Sentinel can’t check its services. That separation is what protects your other devices.`:d.lastScan?'No risky services found in the last check.':'Not checked yet. The first check runs within a few minutes.'}</p>`}
       ${info.length?`<div class="ports" title="Other open services">${info.map(f=>`<span>${f.port} ${esc(f.title)}</span>`).join('')}</div>`:''}
       <dl class="kv"><dt>Address</dt><dd>${esc(d.ip)}</dd>${d.zone?`<dt>Zone</dt><dd>${esc(d.zone)}</dd>`:''}<dt>Found by</dt><dd>${d.via==='router'?'pfSense’s device list'+(d.iface?` (${esc(d.iface)})`:''):'This server’s network scan'}</dd><dt>Hardware</dt><dd>${esc(d.mac)}</dd><dt>Maker</dt><dd>${esc(d.vendor||'Unknown')}</dd>${d.host?`<dt>Network name</dt><dd>${esc(d.host)}</dd>`:''}<dt>First seen</dt><dd>${d.baseline?'Before Sentinel started watching':new Date(d.first).toLocaleString()}</dd><dt>Last seen</dt><dd>${d.online?'Now':new Date(d.last).toLocaleString()}</dd><dt>Last checked</dt><dd>${d.reach===false?'Not reachable from this server':d.lastScan?ago(d.lastScan):'Not yet'}</dd></dl>
@@ -1231,10 +1250,14 @@ function renderDevices(){
   Object.entries(cnt).forEach(([k,v])=>$('#df-'+k).textContent=v);
   $('#tsMeta').textContent=T.length?`${tsOn} of ${T.length} online`:'';
   $('#tsList').innerHTML=T.length?T.map(x=>`<div class="rw"><span class="hd" style="background:${x.online?C.ok:C.ink3}"></span><span class="nm">${esc(x.name)}${x.self?' <span class="tag">This server</span>':''}<small>${esc([x.os,(x.ips||[])[0]].filter(Boolean).join(' · '))}</small></span><span class="st" style="color:${x.online?C.ok:C.ink3}">${x.online?'Online':'Offline'}</span></div>`).join(''):'<p class="empty" style="padding:4px 18px 16px">Tailscale isn’t running on this server.</p>';
+  const gone=D.filter(d=>!d.online&&!d.known&&!d.self&&!d.watch&&!d.gateway).length, bk=$('#devBulk');
+  bk.hidden=!gone;
+  if(gone&&bk.dataset.n!==String(gone)){bk.dataset.n=gone;bk.dataset.arm='';bk.innerHTML=`<span>${gone} offline device${gone>1?'s aren’t':' isn’t'} marked as yours.</span><button class="btn ghost" id="bulkGo">Remove ${gone>1?'them':'it'}</button>`;}
+  if(!gone)bk.dataset.n='0';
   if($('#devList').contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
   const f={all:()=>true,review:needsReview,risk:atRisk,watch:d=>d.watch,offline:d=>!d.online}[devFilter];
   const rows=D.filter(f).filter(d=>devZone==='all'||d.zone===devZone).sort((a,b)=>(needsReview(b)-needsReview(a))||(worst(a)-worst(b))||(b.online-a.online)||devLabel(a).localeCompare(devLabel(b)));
-  const sig=devFilter+'|'+devZone+'|'+Z.length+'|'+devOpen+'|'+rows.map(d=>[d.mac,d.online,d.known,d.watch,d.name,d.ip,d.lastScan,d.host,d.zone,d.reach,(d.findings||[]).length].join(',')).join(';');
+  const sig=devFilter+'|'+devZone+'|'+Z.length+'|'+devOpen+'|'+rows.map(d=>[d.mac,d.online,d.known,d.watch,d.name,d.ip,d.lastScan,d.host,d.zone,d.reach,(d.findings||[]).length,d.same?d.same.mac:''].join(',')).join(';');
   if(sig===devSig)return;devSig=sig;
   $('#devList').innerHTML=rows.map(devCard).join('')||`<p class="empty">${D.length?'No devices match this filter.':'Looking for devices on your network. This takes a minute or two after Sentinel starts.'}</p>`;
 }
@@ -1244,12 +1267,15 @@ $('#devList').addEventListener('click',e=>{
   if(!b){if(e.target.closest('.al-head')){devOpen=devOpen===mac?null:mac;devSig='';renderDevices();}return;}
   const a=b.dataset.da;
   act('device',a==='known'||a==='watch'?{mac,action:a,value:b.dataset.v==='true'}:{mac,action:a});
-  if(a==='forget')devOpen=null;devSig='';
+  if(a==='forget'||a==='merge')devOpen=null;devSig='';
 });
 $('#devList').addEventListener('submit',e=>{e.preventDefault();const f=e.target.closest('.rename');if(!f)return;const v=f.querySelector('input').value.trim();f.querySelector('input').blur();devSig='';act('device',{mac:f.dataset.mac,action:'rename',name:v});});
 $('#zoneFilter').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;devZone=b.dataset.z;$('#zoneFilter').dataset.sig='';devSig='';renderDevices();});
 $('#devFilter').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;devFilter=b.dataset.f;document.querySelectorAll('#devFilter .chip').forEach(x=>x.setAttribute('aria-pressed',x===b));devSig='';renderDevices();});
 $('#sweepNow').onclick=()=>act('lan-sweep',{});
+$('#devBulk').addEventListener('click',e=>{const b=e.target.closest('#bulkGo');if(!b)return;const bk=$('#devBulk');
+  if(!bk.dataset.arm){bk.dataset.arm='1';b.textContent='Tap again to remove';b.classList.remove('ghost');b.classList.add('primary');setTimeout(()=>{if(bk.dataset.arm){bk.dataset.arm='';bk.dataset.n='';devSig='';renderDevices();}},5000);return;}
+  bk.dataset.arm='';bk.dataset.n='';devOpen=null;devSig='';act('devices-cleanup',{});});
 $('#dNotify').onclick=()=>act('settings',{devices:{notifyNew:!(S.settings?.devices?.notifyNew!==false)}});
 
 /* ---------- pfSense ---------- */
