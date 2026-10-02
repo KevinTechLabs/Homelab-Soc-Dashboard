@@ -44,7 +44,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.6.2"
+VERSION = "1.6.3"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
@@ -1316,6 +1316,42 @@ def pf_loop():
         except Exception as ex:
             print("sentinel: pfSense check error:", ex, file=sys.stderr)
         time.sleep(600)
+
+
+PF_SILENT_MS = 30 * 60000   # pfSense normally logs every few seconds; half an hour of silence means the feed broke
+
+
+def log_watch_loop():
+    """Alert when pfSense's log feed goes silent (T1562.006 Indicator Blocking) and note when it comes back.
+    Only watches a feed that has worked at least once, and gives it 30 minutes after Sentinel starts."""
+    time.sleep(90)
+    while True:
+        try:
+            t = now_ms()
+            with LOCK:
+                last = S.pf.get("lastLog", 0)
+                since = S.pf.get("silentSince")
+                if last and not since and t - max(last, START_MS) > PF_SILENT_MS:
+                    S.pf["silentSince"] = last
+                    mins = (t - last) // 60000
+                    upsert_alert("logsilent:pf:%d" % last, "high", "pfSense logs stopped arriving", "T1562.006", "Defense Evasion",
+                                 "No firewall or DHCP logs from pfSense for %d minutes (last one at %s). Until they resume, Sentinel can't see "
+                                 "router blocks, port scans stopped at the router, or devices joining other zones. If nothing changed on purpose, "
+                                 "restart remote logging in pfSense: Status \u2192 System Logs \u2192 Settings, untick and re-tick Enable Remote Logging, "
+                                 "then Save. Someone switching off logging is also how attackers hide." % (mins, time.strftime("%H:%M", time.localtime(last / 1000))), t)
+                    add_event(t, "ALERT", "pfSense logs stopped arriving (silent %d min)" % mins, "system", hot=True)
+                elif since and last > since:
+                    gap = (last - since) // 60000
+                    a = S.alerts.get("logsilent:pf:%d" % since)
+                    if a and a["status"] != "closed":
+                        a["status"], a["ackAt"] = "closed", a["ackAt"] or t
+                        a["log"].append([t, "Closed: pfSense logs arriving again after %d minutes" % gap])
+                    add_event(t, "INFO", "pfSense logs are arriving again (silent %d min)" % gap, "system")
+                    S.pf.pop("silentSince", None)
+                    S.dirty = True
+        except Exception as ex:
+            print("sentinel: log watch error:", ex, file=sys.stderr)
+        time.sleep(60)
 
 
 def valid_ip(ip):
@@ -2750,7 +2786,8 @@ def main():
     S.load()
     S.my_ips = my_addresses()
     for fn in (journal_loop, sampler_loop, saver_loop, notifier_loop, summary_loop,
-               geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop, wazuh_loop):
+               geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop, wazuh_loop,
+               log_watch_loop):
         threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
     print("Sentinel agent %s listening on %s:%d" % (VERSION, BIND_HOST, BIND_PORT), flush=True)

@@ -73,6 +73,7 @@ State lives in `/var/lib/sentinel/state.json`, and the access key in `/etc/senti
 | New device joined the Tailscale network | high | T1078 | Initial Access |
 | Watched device went offline | medium | — | Impact |
 | Wazuh agent stopped reporting | medium | T1562.001 | Defense Evasion |
+| pfSense logs stopped arriving (30 min of silence; closes itself when logs resume) | high | T1562.006 | Defense Evasion |
 | Any Wazuh alert level 7+ (Sysmon, auth, FIM, vulnerability, ...) | mapped from Wazuh level | from the Wazuh rule | from the Wazuh rule |
 
 Noise control: repeated events are grouped per source and hour. Router log lines are rolled up per attacker every 5 minutes. Late reply packets (TCP without SYN, UDP from DNS/QUIC/NTP servers) and one-off drops aren't counted as hostile sources.
@@ -154,7 +155,7 @@ This gives the server the ability to change your router's firewall, so skip it i
 | Symptom | Cause and fix |
 |---|---|
 | Devices in other zones show **offline** while they're actually online | Without the SSH device list, Sentinel only learns about other zones from DHCP log events and marks a device offline 3 hours after the last one. Connect the device list (above). If the Respond tab says the router firewall log stopped, see the next row. |
-| **Router firewall log** stopped updating | Check that packets arrive with `sudo tcpdump -ni <iface> udp port 5140`. If nothing arrives, pfSense stopped sending: untick and re-tick **Enable Remote Logging** and save, which restarts its syslog daemon. This happened once in my lab; logs went silent for 7.5 hours with the settings unchanged. |
+| **Router firewall log** stopped updating (Sentinel raises **"pfSense logs stopped arriving"** after 30 minutes) | Check that packets arrive with `sudo tcpdump -ni <iface> udp port 5140`. If nothing arrives, pfSense stopped sending: untick and re-tick **Enable Remote Logging** and save, which restarts its syslog daemon. In my lab this happened twice with **Source Address** set to **LAN**. Switching it to **Default (any)** is the fix being tested. |
 | A phone shows up as a **new device** every time it rejoins | iOS/Android "rotating" private Wi-Fi addresses. Open the new device: Sentinel offers **Same device: merge** when it matches one you already named. Setting the phone's private address to **Fixed** for your home network stops it. |
 | Only some devices have a **glowing line** on the network map | By design. A glowing line means a live connection to the server right now (Pi-hole glows because the server uses it for DNS), not that the device is online. The green dot shows online status. |
 
