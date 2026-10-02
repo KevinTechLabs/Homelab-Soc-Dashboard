@@ -143,7 +143,20 @@ At most 6 alert messages post per 5 minutes. When more fire in that time, the ne
 - attackers shown in green on the map
 - devices from **every VLAN**, labeled with their zone
 
-**Network-wide blocking (optional):** turn on SSH in pfSense with **Public Key Only**, then paste the dashboard's public key into **System → User Manager → admin → Authorized SSH Keys**. **Block** on an internet address then runs `easyrule block wan <address>`, protecting every device. This gives the server the ability to change your router's firewall, so skip it if that trade-off isn't right for you.
+**Network-wide blocking and the full device list (optional):** turn on SSH in pfSense with **Public Key Only**, then paste the dashboard's public key into **System → User Manager → admin → Authorized SSH Keys**. You get two things:
+- **Block** on an internet address runs `easyrule block wan <address>`, protecting every device.
+- Every 5 minutes Sentinel reads pfSense's ARP table and DHCP leases, so devices in **every zone** show their real online status, including devices with fixed addresses.
+
+This gives the server the ability to change your router's firewall, so skip it if that trade-off isn't right for you.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Devices in other zones show **offline** while they're actually online | Without the SSH device list, Sentinel only learns about other zones from DHCP log events and marks a device offline 3 hours after the last one. Connect the device list (above). If the Respond tab says the router firewall log stopped, see the next row. |
+| **Router firewall log** stopped updating | Check that packets arrive with `sudo tcpdump -ni <iface> udp port 5140`. If nothing arrives, pfSense stopped sending: untick and re-tick **Enable Remote Logging** and save, which restarts its syslog daemon. This happened once in my lab; logs went silent for 7.5 hours with the settings unchanged. |
+| A phone shows up as a **new device** every time it rejoins | iOS/Android "rotating" private Wi-Fi addresses. Open the new device: Sentinel offers **Same device: merge** when it matches one you already named. Setting the phone's private address to **Fixed** for your home network stops it. |
+| Only some devices have a **glowing line** on the network map | By design. A glowing line means a live connection to the server right now (Pi-hole glows because the server uses it for DNS), not that the device is online. The green dot shows online status. |
 
 ## Other ways to open the dashboard
 
