@@ -16,6 +16,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
 - **Response actions:** block and unblock attackers (ufw on the server, or pfSense for the whole network), optional auto-block, alert acknowledge, escalate and close, and a one-click clear of the hostile-sources list (blocked addresses stay).
 - **Wazuh SIEM integration:** pulls Wazuh alerts (rule, agent, MITRE mapping, deep link), agent health and vulnerability counts through Wazuh's indexer and server APIs, using read-only accounts and certificate pinning. Alerts when a watched device's agent stops reporting (T1562.001); agents on machines you switch off just log a line.
 - **Discord notifications:** rate-limited alerts for high and critical events, plus a daily summary in your time zone.
+- **Alerts from other systems:** Prometheus Alertmanager and GitOps deploy agents can push alerts in. They land in the same inbox with the same acknowledge / escalate / close flow, close themselves when the source reports them resolved, and go to the same Discord channel. A heartbeat watchdog warns you when a monitored machine goes silent.
 - **Runs anywhere you look:** a responsive web app (installable on phone and PC), a Windows app-window launcher, and an optional Electron desktop build.
 - **Secure by default:** the API listens on localhost behind nginx, actions need an access key, and the webhook is never sent to the browser.
 
@@ -49,7 +50,7 @@ A self-hosted **security operations center (SOC) dashboard and network threat mo
                                                           └─ HTTPS ──► Discord webhook, ip-api.com (geo)
 ```
 
-State lives in `/var/lib/sentinel/state.json`, and the access key in `/etc/sentinel/token`.
+State lives in `/var/lib/sentinel/state.json`, the access key in `/etc/sentinel/token`, and the ingest-only key in `/etc/sentinel/ingest_token`.
 
 ## Detections
 
@@ -136,6 +137,62 @@ In the dashboard, go to **Respond → Discord notifications**:
 
 At most 6 alert messages post per 5 minutes. When more fire in that time, the next message says how many were held back. The webhook is stored only on the server.
 
+## Alerts from Prometheus and deploy pipelines
+
+Sentinel can be the one inbox for your whole lab, not just security. Two
+endpoints accept alerts from other systems. Give those systems the **ingest
+key** (`sudo cat /etc/sentinel/ingest_token`), not your access key: it works
+only on `/api/ingest/*`, so a copy on another machine can't block addresses,
+change notifications or touch the router. Send it as
+`Authorization: Bearer <key>` (or `X-Sentinel-Key`).
+
+**Prometheus Alertmanager:** point a webhook receiver at Sentinel:
+
+```yaml
+receivers:
+  - name: sentinel
+    webhook_configs:
+      - url: http://SENTINEL-IP:8088/api/ingest/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/sentinel_key   # the ingest key
+```
+
+- Each firing alert becomes a Sentinel alert, titled `AlertName (env)`, with
+  the rule's `summary` as the detail. Severity comes from the `severity`
+  label: `critical` → critical, `page` → high, `warn` → medium, anything
+  else → low. Add `mitre_technique` / `mitre_tactic` labels to a rule to map
+  it to ATT&CK; otherwise it's filed under Impact.
+- Repeat notifications update the same alert. When Alertmanager sends
+  *resolved*, the alert closes itself and Discord gets a short **RESOLVED**
+  message (only for alerts that were sent to Discord in the first place).
+  If it fires again later, that's a new alert.
+- **Dead man's switch:** an always-firing alert named `Watchdog` is treated
+  as a heartbeat, not an alert. If a machine that has sent one goes quiet for
+  5 minutes (`SENTINEL_WATCHDOG_SILENT_MIN`), Sentinel raises *Monitoring on
+  &lt;host&gt; stopped reporting* (T1562.006) and closes it when the heartbeat
+  returns. This works best when Sentinel runs on a different machine from
+  the one it's watching.
+
+**One-off events** (for example a deploy agent):
+
+```bash
+curl -fsS -X POST http://SENTINEL-IP:8088/api/ingest/event \
+  -H "Authorization: Bearer $INGEST_KEY" -H 'Content-Type: application/json' \
+  -d '{"source":"ai-lab","kind":"GitOps","level":"high","title":"staging rolled back",
+       "text":"65cda30 failed its post-deploy checks","key":"rollback:staging:65cda30"}'
+```
+
+`level` is `info` (activity feed only) or `low` / `medium` / `high` /
+`critical` (raises an alert; same `key` = same alert). Optional `technique` and
+`tactic` set the ATT&CK mapping.
+
+Ingested alerts show a **Prometheus**, **GitOps** or **Watchdog** tag in the
+Alerts tab, and `/api/state` lists every source under `integrations`. Tests:
+`python3 -m unittest discover -s tests`.
+
 ## pfSense integration
 
 **Firewall and DHCP logs (recommended):** in pfSense, go to **Status → System Logs → Settings → Remote Logging**. Set the remote server to `SERVER-IP:5140` and tick **Firewall Events** and **DHCP Events**. You get:
@@ -175,14 +232,17 @@ If the dashboard can't reach the agent, it runs in **demo mode** with simulated 
 | `web/index.html` | The whole dashboard (single file, no build step) |
 | `web/manifest.webmanifest`, `web/sw.js`, `web/icons/` | Installable web-app support |
 | `install-server.sh` | Ubuntu installer and updater (nginx + systemd) |
+| `tests/` | Tests for the ingest endpoints (`python3 -m unittest discover -s tests`) |
 | `examples/zones.example.json` | Example VLAN zone names |
 | `main.js`, `package.json` | Optional Electron desktop shell |
 | `Start Sentinel.bat`, `Install Shortcuts.bat` | Windows app-window launcher |
 
 ## Tech
 
-Python 3 (stdlib `http.server`, `subprocess`, `socket`), vanilla JavaScript and Canvas (no framework), nginx, systemd, ufw, journald, pfSense syslog/easyrule, the Discord webhook API, the Wazuh indexer and server REST APIs, and the Tailscale CLI.
+Python 3 (stdlib `http.server`, `subprocess`, `socket`), vanilla JavaScript and Canvas (no framework), nginx, systemd, ufw, journald, pfSense syslog/easyrule, the Discord webhook API, the Wazuh indexer and server REST APIs, the Prometheus Alertmanager webhook format, and the Tailscale CLI.
 
 ## Related
+
+[Personal-CI-CD](https://github.com/KevinTechLabs/Personal-CI-CD) sends its Prometheus alerts and deploy events here.
 
 The home-lab network this dashboard monitors, including VLAN zones, pfSense rules, Suricata, pfBlockerNG and Pi-hole, is documented in [Desk-Pi-Rack](https://github.com/KevinTechLabs/Desk-Pi-Rack).
