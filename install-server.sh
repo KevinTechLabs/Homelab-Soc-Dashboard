@@ -9,6 +9,7 @@ ROOT=/var/www/sentinel
 AGENT_DIR=/opt/sentinel
 UNIT=/etc/systemd/system/sentinel-agent.service
 TOKEN_FILE=/etc/sentinel/token
+INGEST_TOKEN_FILE=/etc/sentinel/ingest_token
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$HERE/web"
 AGENT_SRC="$HERE/agent/sentinel_agent.py"
@@ -79,6 +80,11 @@ if [[ ! -s "$TOKEN_FILE" ]]; then
   python3 -c 'import secrets; print(secrets.token_urlsafe(12))' > "$TOKEN_FILE"
 fi
 chmod 600 "$TOKEN_FILE"
+# Separate, longer key that can only push alerts in (Alertmanager, deploy agents).
+if [[ ! -s "$INGEST_TOKEN_FILE" ]]; then
+  python3 -c 'import secrets; print(secrets.token_urlsafe(32))' > "$INGEST_TOKEN_FILE"
+fi
+chmod 600 "$INGEST_TOKEN_FILE"
 cat > "$UNIT" <<UNITFILE
 [Unit]
 Description=Sentinel agent (feeds live security data to the Sentinel dashboard)
@@ -120,6 +126,13 @@ server {
 
     location / {
         try_files \$uri \$uri/ /index.html;
+    }
+    # Alertmanager / GitOps agents push alerts here (ingest key or access key).
+    location /api/ingest/ {
+        proxy_pass http://127.0.0.1:8765;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_read_timeout 15s;
+        client_max_body_size 128k;
     }
     location /api/ {
         proxy_pass http://127.0.0.1:8765;
@@ -186,6 +199,8 @@ echo "  Open:        http://${IP:-<server-ip>}:$PORT"
 echo "  Access key:  $(cat "$TOKEN_FILE")"
 echo "  (The dashboard asks for this key the first time you block an address or change an alert."
 echo "   To see it again: sudo cat $TOKEN_FILE)"
+echo "  Ingest key:  sudo cat $INGEST_TOKEN_FILE"
+echo "  (For Prometheus Alertmanager or deploy agents sending alerts in; it can't do anything else.)"
 if ! command -v ufw >/dev/null || ! ufw status | grep -q "Status: active"; then
   echo
   echo "Note: the ufw firewall is off, so blocking addresses won't take effect yet. To turn it on safely:"

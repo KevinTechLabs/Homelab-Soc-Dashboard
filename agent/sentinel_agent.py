@@ -14,7 +14,10 @@ Serves: GET  /api/state      one JSON snapshot for the dashboard
         POST /api/devices-cleanup   remove offline devices not marked as yours
         POST /api/lan-sweep  look for devices on the home network now
         POST /api/pfsense    {"action": "save|test|key|disconnect", ...}  pfSense router link
-POST requests need the access key from /etc/sentinel/token in the X-Sentinel-Key header.
+        POST /api/ingest/alertmanager   Prometheus Alertmanager webhook (firing + resolved)
+        POST /api/ingest/event          {"source", "level", "title", "text", ...} one-off events
+POST requests need the access key from /etc/sentinel/token in the X-Sentinel-Key header
+(or "Authorization: Bearer <key>", which is what Alertmanager can send).
 
 Standard library only. Listens on 127.0.0.1:8765; nginx forwards /api/ to it.
 """
@@ -44,12 +47,16 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.6.3"
+VERSION = "1.7.0"
 BIND_HOST = os.environ.get("SENTINEL_BIND", "127.0.0.1")
 BIND_PORT = int(os.environ.get("SENTINEL_PORT", "8765"))
 STATE_DIR = os.environ.get("SENTINEL_STATE_DIR", "/var/lib/sentinel")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 TOKEN_FILE = os.environ.get("SENTINEL_TOKEN_FILE", "/etc/sentinel/token")
+# Least privilege for machines that only report alerts: this key works on
+# /api/ingest/* and nothing else, so a leaked copy can't block addresses or
+# change the router.
+INGEST_TOKEN_FILE = os.environ.get("SENTINEL_INGEST_TOKEN_FILE", "/etc/sentinel/ingest_token")
 WEB_ROOT = os.environ.get("SENTINEL_WEB_ROOT")  # optional: serve the dashboard without nginx
 JOURNAL_CMD = os.environ.get("SENTINEL_JOURNAL_CMD")  # testing hook: JSON list replacing journalctl
 
@@ -173,6 +180,8 @@ class Store:
         self.settings["pfsense"] = dict(PF_DEFAULTS)
         self.pf = {"lastLog": 0, "sshOk": None, "sshMsg": "", "edgeBlocked": set(), "lastCheck": 0, "recent": {},
                    "nbrOk": None, "nbrMsg": "", "nbrLast": 0, "nbrCount": 0, "nbrSeen": False, "dhcpLast": 0}
+        # alerts pushed in from other systems (Prometheus Alertmanager, GitOps agents)
+        self.ingest = {"watchdog": {}, "silent": {}, "last": 0, "received": 0, "sources": {}}
         self.learning = True       # first run: learn existing logins/ports quietly
         self.dirty = False
         # rolling windows (not persisted)
@@ -230,6 +239,11 @@ class Store:
         self.pf["nbrSeen"] = bool(d.get("pf_nbr_seen"))
         self.pf["dhcpLast"] = int(d.get("pf_dhcp_last") or 0)
         self.pf["lastLog"] = int(d.get("pf_last_log") or 0)
+        ing = d.get("ingest")
+        if isinstance(ing, dict):
+            for k in ("watchdog", "silent", "sources"):
+                if isinstance(ing.get(k), dict):
+                    self.ingest[k] = ing[k]
         bp = d.get("baseline_ports")
         self.baseline_ports = set(bp) if bp is not None else None
         st = d.get("settings", {})
@@ -258,6 +272,7 @@ class Store:
             "pf_nbr_seen": self.pf.get("nbrSeen", False),
             "pf_dhcp_last": self.pf.get("dhcpLast", 0),
             "pf_last_log": self.pf.get("lastLog", 0),
+            "ingest": {k: self.ingest[k] for k in ("watchdog", "silent", "sources")},
             "settings": self.settings,
             "sources": [dict(s, users=sorted(s["users"])[:50], ports=sorted(s["ports"])[:50])
                         for s in self.sources.values()],
@@ -1352,6 +1367,244 @@ def log_watch_loop():
         except Exception as ex:
             print("sentinel: log watch error:", ex, file=sys.stderr)
         time.sleep(60)
+
+
+# --------------------------------------------------------------------------- integrations
+# Other systems can push alerts into Sentinel so everything lands in one inbox
+# (and one Discord channel) with the same acknowledge / escalate / close flow.
+#
+#   /api/ingest/alertmanager  Prometheus Alertmanager webhook. A firing alert
+#       becomes a Sentinel alert; when Alertmanager reports it resolved, the
+#       alert closes itself. Labels `mitre_technique` / `mitre_tactic` on the
+#       Prometheus rule set the ATT&CK mapping (default: no technique, Impact).
+#   /api/ingest/event         one-off events, e.g. a GitOps agent reporting a
+#       deploy (feed only) or a rollback / refused image (alert).
+#
+# Dead man's switch: an always-firing alert named "Watchdog" is not shown as an
+# alert; it is a heartbeat. If a source that has sent it goes quiet for
+# SENTINEL_WATCHDOG_SILENT_MIN minutes, Sentinel raises "monitoring stopped
+# reporting" and closes it again when the heartbeat returns.
+
+INGEST_MAX_BYTES = 131072
+WATCHDOG_SILENT_MS = int(os.environ.get("SENTINEL_WATCHDOG_SILENT_MIN", "5")) * 60000
+TACTICS = ("Initial Access", "Execution", "Persistence", "Privilege Escalation", "Defense Evasion",
+           "Credential Access", "Discovery", "Lateral Movement", "Command and Control", "Exfiltration", "Impact")
+EXT_SEV = {"critical": "critical", "page": "high", "high": "high", "error": "high", "warn": "medium",
+           "warning": "medium", "medium": "medium", "info": "low", "low": "low", "none": "low"}
+RX_TECH = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+RX_SOURCE = re.compile(r"[^A-Za-z0-9._:-]")
+
+
+def clean(v, n):
+    """Single-line, length-capped text from an untrusted payload."""
+    return re.sub(r"\s+", " ", str(v if v is not None else "")).strip()[:n]
+
+
+def ext_source(v):
+    return RX_SOURCE.sub("", str(v or ""))[:64] or "unknown"
+
+
+def rfc3339_ms(v, default):
+    """Alertmanager timestamps: 2026-10-05T05:01:02.123456789Z (or with an offset)."""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$", str(v or ""))
+    if not m or m.group(1).startswith("0001"):
+        return default
+    tz = "+00:00" if m.group(3) == "Z" else m.group(3)
+    try:
+        dt = datetime.fromisoformat(m.group(1) + tz)
+    except ValueError:
+        return default
+    return int(dt.timestamp() * 1000) + int((m.group(2) or "0")[:3].ljust(3, "0"))
+
+
+def ext_mapping(labels):
+    tech = labels.get("mitre_technique", "")
+    tac = labels.get("mitre_tactic", "")
+    return (tech if RX_TECH.match(tech) else "—"), (tac if tac in TACTICS else "Impact")
+
+
+def note_source(src, kind, t):
+    s = S.ingest["sources"].setdefault(src, {"kind": kind, "first": t, "last": t, "count": 0})
+    s["last"], s["kind"] = t, kind
+    s["count"] = s.get("count", 0) + 1
+    S.ingest["last"] = t
+    S.ingest["received"] += 1
+
+
+def notify_resolved(a, t):
+    """Tell Discord an alert it was told about has cleared."""
+    n = S.settings.get("notify") or {}
+    if not n.get("enabled") or not n.get("webhook") or t < START_MS - 5000:
+        return
+    limit = "critical" if n.get("minSev") == "critical" else "high"
+    if SEV_RANK[a["sev"]] > SEV_RANK[limit]:
+        return
+    enqueue({"title": "✅ RESOLVED: %s" % a["t"], "description": a["det"].split(". ")[0] + ".",
+             "color": 0x3FB37F, "footer": {"text": "%s · %s" % (a.get("host", HOST), a["id"])},
+             "timestamp": iso(t)})
+
+
+def close_ext(a, t, why):
+    if a["status"] == "closed":
+        return False
+    a["status"], a["ackAt"] = "closed", a["ackAt"] or t
+    a["log"].append([t, why])
+    notify_resolved(a, t)
+    S.dirty = True
+    return True
+
+
+def watchdog_seen(src, t):
+    S.ingest["watchdog"][src] = t
+    since = S.ingest["silent"].pop(src, None)
+    if since is not None:
+        gap = max(0, (t - since) // 60000)
+        a = S.alerts.get("watchdog:%s:%d" % (src, since))
+        if a:
+            close_ext(a, t, "Closed: monitoring on %s is reporting again after %d minutes" % (src, gap))
+        add_event(t, "INFO", "Monitoring on %s is reporting again (silent %d min)" % (src, gap), "system")
+    S.dirty = True
+
+
+def ingest_alertmanager(body, t):
+    alerts = body.get("alerts")
+    if not isinstance(alerts, list) or len(alerts) > 500:
+        raise ValueError("expected an Alertmanager webhook payload")
+    common = body.get("commonLabels") if isinstance(body.get("commonLabels"), dict) else {}
+    raised = closed = beats = 0
+    for al in alerts:
+        if not isinstance(al, dict) or not isinstance(al.get("labels"), dict):
+            continue
+        labels = {clean(k, 64): clean(v, 200) for k, v in al["labels"].items()}
+        ann = al.get("annotations") if isinstance(al.get("annotations"), dict) else {}
+        name = labels.get("alertname") or "Alert"
+        src = ext_source(labels.get("host") or common.get("host") or "alertmanager")
+        note_source(src, "alertmanager", t)
+        if name == "Watchdog":
+            if clean(al.get("status"), 16) == "resolved":
+                # Prometheus stopped evaluating rules (or was restarted with
+                # them removed): don't wait for the silence timer.
+                raise_silence(src, S.ingest["watchdog"].get(src, t), t,
+                              "Alertmanager reports the Watchdog heartbeat ended, so Prometheus on %s "
+                              "has stopped evaluating alert rules" % src)
+            else:
+                watchdog_seen(src, t)
+                beats += 1
+            continue
+        fp = clean(al.get("fingerprint"), 32) or hashlib.sha1(
+            json.dumps(labels, sort_keys=True).encode()).hexdigest()[:16]
+        started = rfc3339_ms(al.get("startsAt"), t)
+        key = "am:%s:%s:%d" % (src, fp, started)       # a new firing episode gets a new alert
+        status = clean(al.get("status"), 16)
+        env = labels.get("env")
+        title = clean("%s%s" % (name, " (%s)" % env if env else ""), 120)
+        if status == "resolved":
+            a = S.alerts.get(key)
+            if a and close_ext(a, t, "Resolved: Alertmanager reports it cleared after %d minutes"
+                               % max(0, (rfc3339_ms(al.get("endsAt"), t) - started) // 60000)):
+                add_event(t, "INFO", "%s cleared on %s" % (title, src), "system")
+                closed += 1
+            continue
+        sev = EXT_SEV.get(labels.get("severity", "").lower(), "medium")
+        tech, tac = ext_mapping(labels)
+        det = clean(ann.get("summary") or name, 400)
+        if ann.get("description"):
+            det = clean("%s. %s" % (det.rstrip("."), ann["description"]), 800)
+        is_new = key not in S.alerts
+        # Use the time Sentinel received it for notification decisions: an alert
+        # that started while Sentinel was unreachable is still news when it arrives.
+        a = upsert_alert(key, sev, title, tech, tac, det.rstrip("."), t, src=src)
+        if is_new:
+            a["time"] = started  # but show when the problem really began
+        a["host"] = src
+        a["ext"] = {"from": "Prometheus", "labels": {k: v for k, v in labels.items()
+                                                     if k not in ("alertname", "severity", "host")}}
+        url = clean(al.get("generatorURL"), 300)
+        if url.startswith(("http://", "https://")):
+            a["ext"]["url"] = url
+        if is_new:
+            a["log"][0] = [started, "Raised by Alertmanager on %s" % src]
+            add_event(t, "ALERT", "%s: %s" % (title, det), "system", hot=sev in ("critical", "high"))
+            raised += 1
+    return {"raised": raised, "resolved": closed, "heartbeats": beats}
+
+
+EVENT_LEVELS = ("info", "low", "medium", "high", "critical")
+
+
+def ingest_event(body, t):
+    level = clean(body.get("level"), 10).lower() or "info"
+    if level not in EVENT_LEVELS:
+        raise ValueError("level must be one of " + ", ".join(EVENT_LEVELS))
+    title = clean(body.get("title"), 120)
+    if not title:
+        raise ValueError("title is required")
+    src = ext_source(body.get("source") or "event")
+    text = clean(body.get("text") or title, 800)
+    note_source(src, "event", t)
+    add_event(t, "ALERT" if level in ("high", "critical") else "INFO", "%s: %s" % (src, text), "system",
+              hot=level in ("high", "critical"))
+    if level == "info":
+        return {"alert": None}
+    labels = {"mitre_technique": clean(body.get("technique"), 16), "mitre_tactic": clean(body.get("tactic"), 32)}
+    tech, tac = ext_mapping(labels)
+    dedupe = clean(body.get("key"), 80) or hashlib.sha1((title + text).encode()).hexdigest()[:16]
+    a = upsert_alert("evt:%s:%s" % (src, dedupe), level, title, tech, tac, text.rstrip("."), t, src=src)
+    a["host"] = src
+    a["ext"] = {"from": clean(body.get("kind"), 24) or "Event"}
+    if a["log"][0][1] == "Detected by Sentinel agent":
+        a["log"][0] = [t, "Reported by %s" % src]
+    return {"alert": a["id"]}
+
+
+def raise_silence(src, last, t, why=None):
+    """Raise (once) the "monitoring stopped reporting" alert for src. Call with LOCK held."""
+    if src in S.ingest["silent"]:
+        return None
+    S.ingest["silent"][src] = last
+    mins = max(0, (t - last) // 60000)
+    why = why or "No heartbeat from Prometheus/Alertmanager on %s for %d minutes" % (src, mins)
+    a = upsert_alert("watchdog:%s:%d" % (src, last), "high", "Monitoring on %s stopped reporting" % src,
+                     "T1562.006", "Defense Evasion",
+                     "%s (last heartbeat at %s). Either the machine is down or offline, its monitoring stack "
+                     "stopped, or the network path to Sentinel broke. Until it returns, no alerts from %s can "
+                     "reach you. Check that the host is up, run `docker compose ps` in deploy/observability, and "
+                     "test that it can reach this server" % (why, time.strftime("%H:%M", time.localtime(last / 1000)), src),
+                     t, src=src)
+    a["host"] = src
+    a["ext"] = {"from": "Watchdog"}
+    a["log"][0] = [t, "Raised by Sentinel's heartbeat watchdog"]
+    add_event(t, "ALERT", "Monitoring on %s stopped reporting" % src, "system", hot=True)
+    S.dirty = True
+    return a["id"]
+
+
+def watchdog_check(t):
+    """Raise "monitoring stopped reporting" for each heartbeat source gone quiet. Call with LOCK held."""
+    raised = []
+    for src, last in list(S.ingest["watchdog"].items()):
+        if src not in S.ingest["silent"] and t - max(last, START_MS) > WATCHDOG_SILENT_MS:
+            raised.append(raise_silence(src, last, t))
+    return raised
+
+
+def watchdog_loop():
+    """Dead man's switch for every source that has sent a Watchdog heartbeat."""
+    time.sleep(60)
+    while True:
+        try:
+            with LOCK:
+                watchdog_check(now_ms())
+        except Exception as ex:
+            print("sentinel: watchdog error:", ex, file=sys.stderr)
+        time.sleep(60)
+
+
+def ingest_snapshot(t):
+    return {"received": S.ingest["received"], "last": S.ingest["last"],
+            "sources": [{"name": k, "kind": v.get("kind"), "last": v.get("last"), "count": v.get("count", 0),
+                         "watchdog": S.ingest["watchdog"].get(k), "silent": k in S.ingest["silent"]}
+                        for k, v in sorted(S.ingest["sources"].items())]}
 
 
 def valid_ip(ip):
@@ -2477,32 +2730,35 @@ def snapshot():
                           key=lambda d: (not d.get("online"), d.get("ip", ""))),
         "zones": zone_summary(),
         "wazuh": wz_snapshot(),
+        "integrations": ingest_snapshot(t),
         "tailnet": sorted(S.tailnet.values(), key=lambda x: (not x.get("self"), not x.get("online"), x.get("name", ""))),
         "geo": {ip: S.geo[ip] for ip in {s["ip"] for s in sources} | {a["src"] for a in alerts} if ip in S.geo},
     }
 
 
 # --------------------------------------------------------------------------- HTTP
-def load_token():
+def load_token(path=None, nbytes=12):
+    path = path or TOKEN_FILE
     try:
-        with open(TOKEN_FILE) as f:
+        with open(path) as f:
             tok = f.read().strip()
             if tok:
                 return tok
     except FileNotFoundError:
         pass
-    tok = secrets.token_urlsafe(12)
+    tok = secrets.token_urlsafe(nbytes)
     try:
-        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-        with open(TOKEN_FILE, "w") as f:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
             f.write(tok + "\n")
-        os.chmod(TOKEN_FILE, 0o600)
+        os.chmod(path, 0o600)
     except Exception as ex:
         print("sentinel: could not write token file:", ex, file=sys.stderr)
     return tok
 
 
 TOKEN = None
+INGEST_TOKEN = None
 MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".png": "image/png",
         ".ico": "image/x-icon", ".webmanifest": "application/manifest+json", ".json": "application/json",
         ".svg": "image/svg+xml", ".css": "text/css"}
@@ -2549,17 +2805,34 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         key = self.headers.get("X-Sentinel-Key", "")
-        if self.path.split("?")[0] not in self.KEYLESS and not hmac.compare_digest(key.encode(), TOKEN.encode()):
+        auth = self.headers.get("Authorization", "")
+        if not key and auth[:7].lower() == "bearer ":
+            key = auth[7:].strip()   # Alertmanager and scripts send the key this way
+        route = self.path.split("?")[0]
+        ok = hmac.compare_digest(key.encode(), TOKEN.encode())
+        if not ok and INGEST_TOKEN and route.startswith("/api/ingest/"):
+            ok = hmac.compare_digest(key.encode(), INGEST_TOKEN.encode())
+        if route not in self.KEYLESS and not ok:
             return self._send(401, {"error": "Enter the access key shown when you installed Sentinel."})
         try:
             n = int(self.headers.get("Content-Length", "0"))
-            if n > 10000:
+            if n > (INGEST_MAX_BYTES if self.path.startswith("/api/ingest/") else 10000):
                 raise ValueError
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception:
             return self._send(400, {"error": "Bad request"})
         requester = norm_ip(self.headers.get("X-Real-IP") or self.client_address[0])
         path = self.path.split("?")[0]
+        if path in ("/api/ingest/alertmanager", "/api/ingest/event"):
+            if not isinstance(body, dict):
+                return self._send(400, {"error": "Expected a JSON object"})
+            try:
+                with LOCK:
+                    fn = ingest_alertmanager if path.endswith("alertmanager") else ingest_event
+                    res = fn(body, now_ms())
+            except ValueError as ex:
+                return self._send(400, {"error": str(ex)})
+            return self._send(200, dict(ok=True, **res))
         if path == "/api/notify-test":
             with LOCK:
                 n = dict(S.settings["notify"])
@@ -2781,13 +3054,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global TOKEN
+    global TOKEN, INGEST_TOKEN
     TOKEN = load_token()
+    INGEST_TOKEN = load_token(INGEST_TOKEN_FILE, 32)
     S.load()
     S.my_ips = my_addresses()
     for fn in (journal_loop, sampler_loop, saver_loop, notifier_loop, summary_loop,
                geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop, wazuh_loop,
-               log_watch_loop):
+               log_watch_loop, watchdog_loop):
         threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
     print("Sentinel agent %s listening on %s:%d" % (VERSION, BIND_HOST, BIND_PORT), flush=True)

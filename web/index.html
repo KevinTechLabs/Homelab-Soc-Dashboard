@@ -889,7 +889,7 @@ function alertCard(a,fresh){
   const o=a.id===openId, bl=blockedSet(), canBlock=isIP(a.src);
   return `<article class="al ${o?'open':''} ${fresh?'fresh':''} ${a.status==='closed'?'is-closed':''}" data-id="${esc(a.id)}">
     <button class="al-head" aria-expanded="${o}">
-      <span class="row1"><span class="sev ${a.sev}">${a.sev}</span><span class="st ${a.status}">${STATUS[a.status]||a.status}</span>${a.wz?'<span class="tag wz">Wazuh</span>':''}${canBlock&&bl.has(a.src)?'<span class="tag ok">Source blocked</span>':''}</span>
+      <span class="row1"><span class="sev ${a.sev}">${a.sev}</span><span class="st ${a.status}">${STATUS[a.status]||a.status}</span>${a.wz?'<span class="tag wz">Wazuh</span>':''}${a.ext?'<span class="tag wz">'+esc(a.ext.from)+'</span>':''}${canBlock&&bl.has(a.src)?'<span class="tag ok">Source blocked</span>':''}</span>
       <span class="t">${esc(a.t)}</span>
       <span class="s">${esc([a.src!=='—'?a.src:null,a.user!=='—'?a.user:null,a.tech].filter(Boolean).join(' · '))}</span>
       <span class="side"><span class="tm">${hhmm(a.last)}</span>${a.count>1?`<span class="cnt">×${a.count}</span>`:''}</span>
