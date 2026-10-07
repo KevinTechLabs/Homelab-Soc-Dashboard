@@ -1,0 +1,34 @@
+# Tool configuration only. The agent itself is standard-library Python and is
+# installed by install-server.sh, not packaged.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 120
+# Runs on whatever python3 the Ubuntu host ships; stay conservative.
+target-version = "py310"
+
+[tool.ruff.lint]
+# Same rule set as Personal-CI-CD.
+select = ["E", "F", "W", "I", "B", "UP", "S", "BLE", "SIM"]
+ignore = [
+    "E501",   # long strings (HTML/messages); the formatter owns code line length
+    "UP031",  # %-formatting is the house style in this file
+    "BLE001", # the agent is a long-running daemon: one bad record must not kill a loop
+    "S110",   # ...same reason (try/except/pass in poll loops)
+    "S112",   # ...same reason (try/except/continue)
+    "S603",   # subprocess is only called with fixed argv lists of system tools
+    "S607",   # ...which are resolved from PATH on purpose (journalctl, ufw, systemctl)
+    "S310",   # urlopen URLs come from config (Discord, Wazuh, pfSense), always https
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+# B404/B603/B607: see S603/S607 above. B110/B112: see S110/S112 above.
+# B310: see S310 above.
+skips = ["B404", "B603", "B607", "B110", "B112", "B310"]
