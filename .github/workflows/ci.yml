@@ -1,0 +1,55 @@
+name: CI
+
+# Quality job adapted from Personal-CI-CD's pipeline.yml: lint, Python SAST,
+# shell lint and tests on every push to main and every pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.14"
+  RUFF_VERSION: "0.16.8"
+
+jobs:
+  quality:
+    name: Lint, SAST, shellcheck, tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Ruff (lint + format)
+        run: |
+          uvx "ruff@${RUFF_VERSION}" check --output-format=github .
+          uvx "ruff@${RUFF_VERSION}" format --check .
+
+      - name: Bandit (Python SAST)
+        run: |
+          uvx --from "bandit[toml]>=1.8,<2" bandit -c pyproject.toml -r agent -q \
+            -f custom --msg-template "::error file={relpath},line={line}::Bandit {test_id} ({severity}): {msg}"
+
+      - name: ShellCheck
+        # gcc format turned into annotations, so findings show up on the PR diff.
+        run: |
+          set -o pipefail
+          shellcheck -f gcc install-server.sh \
+            | sed -E 's/^([^:]+):([0-9]+):([0-9]+): ([a-z]+): (.*)$/::error file=\1,line=\2,col=\3::ShellCheck \5/'
+
+      - name: Tests
+        run: uv run --no-project --with "pytest>=8" pytest

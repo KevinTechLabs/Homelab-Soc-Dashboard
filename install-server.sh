@@ -21,7 +21,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   rm -f "$UNIT" /etc/nginx/sites-enabled/sentinel "$SITE"
   systemctl daemon-reload || true
   rm -rf "$ROOT" "$AGENT_DIR" /etc/sentinel /var/lib/sentinel
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+  if nginx -t >/dev/null 2>&1; then systemctl reload nginx || true; fi
   echo "Sentinel removed. nginx itself was left installed."
   echo "Any addresses Sentinel blocked are still in ufw; list them with: sudo ufw status numbered"
   exit 0

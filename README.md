@@ -1,5 +1,7 @@
 # Homelab SOC Dashboard
 
+[![CI](https://github.com/KevinTechLabs/Homelab-Soc-Dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/KevinTechLabs/Homelab-Soc-Dashboard/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A self-hosted **security operations center (SOC) dashboard and network threat monitor** for a home lab. The dashboard is called **Sentinel**. It runs on an Ubuntu server, watches the server and the whole home network in real time, maps detections to **MITRE ATT&CK**, pulls in **pfSense** firewall logs, and sends alerts to **Discord**.
 
 ![Overview](docs/screenshots/overview.png)
@@ -232,7 +234,7 @@ If the dashboard can't reach the agent, it runs in **demo mode** with simulated 
 | `web/index.html` | The whole dashboard (single file, no build step) |
 | `web/manifest.webmanifest`, `web/sw.js`, `web/icons/` | Installable web-app support |
 | `install-server.sh` | Ubuntu installer and updater (nginx + systemd) |
-| `tests/` | Tests for the ingest endpoints (`python3 -m unittest discover -s tests`) |
+| `tests/` | Tests for the ingest endpoints and the agent's parsing helpers (`python3 -m unittest discover -s tests`) |
 | `examples/zones.example.json` | Example VLAN zone names |
 | `main.js`, `package.json` | Optional Electron desktop shell |
 | `Start Sentinel.bat`, `Install Shortcuts.bat` | Windows app-window launcher |
@@ -246,3 +248,7 @@ Python 3 (stdlib `http.server`, `subprocess`, `socket`), vanilla JavaScript and 
 [Personal-CI-CD](https://github.com/KevinTechLabs/Personal-CI-CD) sends its Prometheus alerts and deploy events here.
 
 The home-lab network this dashboard monitors, including VLAN zones, pfSense rules, Suricata, pfBlockerNG and Pi-hole, is documented in [Desk-Pi-Rack](https://github.com/KevinTechLabs/Desk-Pi-Rack).
+
+## License
+
+[MIT](LICENSE)

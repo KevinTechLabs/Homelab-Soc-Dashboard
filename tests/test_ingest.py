@@ -20,8 +20,9 @@ from http.server import ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TMP = tempfile.mkdtemp(prefix="sentinel-test-")
-os.environ.update(SENTINEL_STATE_DIR=TMP, SENTINEL_TOKEN_FILE=os.path.join(TMP, "token"),
-                  SENTINEL_WATCHDOG_SILENT_MIN="5")
+os.environ.update(
+    SENTINEL_STATE_DIR=TMP, SENTINEL_TOKEN_FILE=os.path.join(TMP, "token"), SENTINEL_WATCHDOG_SILENT_MIN="5"
+)
 spec = importlib.util.spec_from_file_location("sentinel_agent", ROOT / "agent" / "sentinel_agent.py")
 sa = importlib.util.module_from_spec(spec)
 sys.modules["sentinel_agent"] = sa
@@ -32,16 +33,28 @@ INGEST_KEY = "ingest-only-456"
 MIN = 60000
 
 
-def am_alert(name, status="firing", fp="abc123", starts="2026-10-05T04:00:00Z", ends="0001-01-01T00:00:00Z",
-             **labels):
+def am_alert(name, status="firing", fp="abc123", starts="2026-10-05T04:00:00Z", ends="0001-01-01T00:00:00Z", **labels):
     labels = {"alertname": name, "host": "ai-lab", **labels}
-    return {"status": status, "labels": labels, "fingerprint": fp, "startsAt": starts, "endsAt": ends,
-            "annotations": {"summary": "%s summary" % name}, "generatorURL": "http://prometheus:9090/graph"}
+    return {
+        "status": status,
+        "labels": labels,
+        "fingerprint": fp,
+        "startsAt": starts,
+        "endsAt": ends,
+        "annotations": {"summary": "%s summary" % name},
+        "generatorURL": "http://prometheus:9090/graph",
+    }
 
 
 def am_payload(*alerts, status="firing"):
-    return {"version": "4", "status": status, "receiver": "sentinel", "groupKey": "{}:{}",
-            "commonLabels": {"host": "ai-lab"}, "alerts": list(alerts)}
+    return {
+        "version": "4",
+        "status": status,
+        "receiver": "sentinel",
+        "groupKey": "{}:{}",
+        "commonLabels": {"host": "ai-lab"},
+        "alerts": list(alerts),
+    }
 
 
 class IngestTest(unittest.TestCase):
@@ -73,8 +86,9 @@ class IngestTest(unittest.TestCase):
 
     def post(self, path, body, key=KEY, header="bearer"):
         data = json.dumps(body).encode()
-        req = urllib.request.Request(self.base + path, data=data, method="POST",
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            self.base + path, data=data, method="POST", headers={"Content-Type": "application/json"}
+        )
         if key and header == "bearer":
             req.add_header("Authorization", "Bearer " + key)
         elif key:
@@ -101,8 +115,12 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(self.post("/api/ingest/event", {"title": "x"}, key=INGEST_KEY)[0], 200)
         self.assertEqual(self.post("/api/ingest/alertmanager", am_payload(), key=INGEST_KEY)[0], 200)
         # ...and cannot block addresses, change notifications or the router
-        for path, body in (("/api/block", {"ip": "203.0.113.9"}), ("/api/settings", {"autoblock": True}),
-                           ("/api/pfsense", {"action": "disconnect"}), ("/api/notify-test", {})):
+        for path, body in (
+            ("/api/block", {"ip": "203.0.113.9"}),
+            ("/api/settings", {"autoblock": True}),
+            ("/api/pfsense", {"action": "disconnect"}),
+            ("/api/notify-test", {}),
+        ):
             self.assertEqual(self.post(path, body, key=INGEST_KEY)[0], 401, path)
 
     def test_bearer_does_not_unlock_with_wrong_key(self):
@@ -110,13 +128,20 @@ class IngestTest(unittest.TestCase):
 
     # --- alertmanager --------------------------------------------------------
     def test_firing_alert_becomes_sentinel_alert(self):
-        code, res = self.post("/api/ingest/alertmanager", am_payload(
-            am_alert("EndpointDown", severity="page", env="production",
-                     mitre_technique="T1499", mitre_tactic="Impact")))
+        code, res = self.post(
+            "/api/ingest/alertmanager",
+            am_payload(
+                am_alert(
+                    "EndpointDown", severity="page", env="production", mitre_technique="T1499", mitre_tactic="Impact"
+                )
+            ),
+        )
         self.assertEqual((code, res["raised"]), (200, 1))
         [a] = self.alerts()
         self.assertEqual(a["t"], "EndpointDown (production)")
-        self.assertEqual((a["sev"], a["tech"], a["tac"], a["host"], a["src"]), ("high", "T1499", "Impact", "ai-lab", "ai-lab"))
+        self.assertEqual(
+            (a["sev"], a["tech"], a["tac"], a["host"], a["src"]), ("high", "T1499", "Impact", "ai-lab", "ai-lab")
+        )
         self.assertEqual(a["det"], "EndpointDown summary")
         self.assertEqual(a["ext"]["from"], "Prometheus")
         self.assertEqual(a["ext"]["labels"]["env"], "production")
@@ -132,9 +157,13 @@ class IngestTest(unittest.TestCase):
 
     def test_resolved_closes_and_tells_discord(self):
         self.post("/api/ingest/alertmanager", am_payload(am_alert("WorkerHeartbeatStale", severity="page")))
-        code, res = self.post("/api/ingest/alertmanager", am_payload(
-            am_alert("WorkerHeartbeatStale", status="resolved", severity="page", ends="2026-10-05T04:12:00Z"),
-            status="resolved"))
+        code, res = self.post(
+            "/api/ingest/alertmanager",
+            am_payload(
+                am_alert("WorkerHeartbeatStale", status="resolved", severity="page", ends="2026-10-05T04:12:00Z"),
+                status="resolved",
+            ),
+        )
         self.assertEqual(res["resolved"], 1)
         [a] = self.alerts()
         self.assertEqual(a["status"], "closed")
@@ -144,15 +173,19 @@ class IngestTest(unittest.TestCase):
     def test_refiring_after_resolve_is_a_new_alert(self):
         self.post("/api/ingest/alertmanager", am_payload(am_alert("QueueBacklog", severity="warn")))
         self.post("/api/ingest/alertmanager", am_payload(am_alert("QueueBacklog", status="resolved", severity="warn")))
-        self.post("/api/ingest/alertmanager", am_payload(
-            am_alert("QueueBacklog", severity="warn", starts="2026-10-05T06:00:00Z")))
+        self.post(
+            "/api/ingest/alertmanager",
+            am_payload(am_alert("QueueBacklog", severity="warn", starts="2026-10-05T06:00:00Z")),
+        )
         statuses = [a["status"] for a in self.alerts()]
         self.assertEqual(statuses, ["closed", "new"])
 
     def test_alert_that_began_before_sentinel_started_still_notifies(self):
         # e.g. the network to Sentinel was down when it started firing
-        self.post("/api/ingest/alertmanager", am_payload(am_alert("HostDiskAlmostFull", severity="page",
-                                                                  starts="2020-01-01T00:00:00Z")))
+        self.post(
+            "/api/ingest/alertmanager",
+            am_payload(am_alert("HostDiskAlmostFull", severity="page", starts="2020-01-01T00:00:00Z")),
+        )
         a = self.alerts()[0]
         self.assertEqual(a["time"], sa.rfc3339_ms("2020-01-01T00:00:00Z", 0))
         self.assertEqual(len(self.notified), 1)
@@ -163,8 +196,9 @@ class IngestTest(unittest.TestCase):
         self.assertEqual(self.notified, [])
 
     def test_unknown_mapping_falls_back_safely(self):
-        self.post("/api/ingest/alertmanager", am_payload(
-            am_alert("Odd", mitre_technique="DROP TABLE", mitre_tactic="Chaos")))
+        self.post(
+            "/api/ingest/alertmanager", am_payload(am_alert("Odd", mitre_technique="DROP TABLE", mitre_tactic="Chaos"))
+        )
         a = self.alerts()[0]
         self.assertEqual((a["tech"], a["tac"]), ("—", "Impact"))
 
@@ -201,10 +235,10 @@ class IngestTest(unittest.TestCase):
         last = sa.S.ingest["watchdog"]["ai-lab"]
         with sa.LOCK:
             sa.START_MS = last - 10 * MIN
-            self.assertEqual(sa.watchdog_check(last + 4 * MIN), [])          # still inside the window
+            self.assertEqual(sa.watchdog_check(last + 4 * MIN), [])  # still inside the window
             raised = sa.watchdog_check(last + 6 * MIN)
             self.assertEqual(len(raised), 1)
-            self.assertEqual(sa.watchdog_check(last + 7 * MIN), [])          # raised once, not every minute
+            self.assertEqual(sa.watchdog_check(last + 7 * MIN), [])  # raised once, not every minute
         [a] = self.alerts()
         self.assertEqual((a["t"], a["sev"], a["tech"]), ("Monitoring on ai-lab stopped reporting", "high", "T1562.006"))
         self.assertEqual(len(self.notified), 1)
@@ -215,40 +249,60 @@ class IngestTest(unittest.TestCase):
     def test_resolved_watchdog_raises_immediately(self):
         # Prometheus died: Alertmanager keeps the Watchdog until it expires, then sends it resolved.
         self.post("/api/ingest/alertmanager", am_payload(am_alert("Watchdog")))
-        code, res = self.post("/api/ingest/alertmanager", am_payload(am_alert("Watchdog", status="resolved"),
-                                                                     status="resolved"))
-        self.assertEqual(res["heartbeats"], 0)            # not counted as a heartbeat
+        code, res = self.post(
+            "/api/ingest/alertmanager", am_payload(am_alert("Watchdog", status="resolved"), status="resolved")
+        )
+        self.assertEqual(res["heartbeats"], 0)  # not counted as a heartbeat
         [a] = self.alerts()
         self.assertEqual(a["t"], "Monitoring on ai-lab stopped reporting")
         self.assertIn("stopped evaluating alert rules", a["det"])
         with sa.LOCK:
-            self.assertEqual(sa.watchdog_check(sa.now_ms() + 60 * MIN), [])   # not raised twice
+            self.assertEqual(sa.watchdog_check(sa.now_ms() + 60 * MIN), [])  # not raised twice
         self.post("/api/ingest/alertmanager", am_payload(am_alert("Watchdog")))
         self.assertEqual(self.alerts()[0]["status"], "closed")
 
     def test_watchdog_grace_after_sentinel_restart(self):
         with sa.LOCK:
-            sa.S.ingest["watchdog"]["old-box"] = 0           # heartbeat from long before startup
+            sa.S.ingest["watchdog"]["old-box"] = 0  # heartbeat from long before startup
             sa.START_MS = 100 * MIN
             self.assertEqual(sa.watchdog_check(103 * MIN), [])  # gives the source time to check in
             self.assertEqual(len(sa.watchdog_check(106 * MIN)), 1)
 
     # --- one-off events --------------------------------------------------------
     def test_info_event_goes_to_feed_only(self):
-        code, res = self.post("/api/ingest/event", {"source": "ai-lab", "level": "info", "kind": "GitOps",
-                                                    "title": "staging deployed", "text": "staging: deployed 65cda30"})
+        code, res = self.post(
+            "/api/ingest/event",
+            {
+                "source": "ai-lab",
+                "level": "info",
+                "kind": "GitOps",
+                "title": "staging deployed",
+                "text": "staging: deployed 65cda30",
+            },
+        )
         self.assertEqual((code, res["alert"]), (200, None))
         self.assertEqual(self.alerts(), [])
         self.assertIn("deployed 65cda30", sa.S.events[-1]["text"])
 
     def test_critical_event_raises_mapped_alert(self):
-        code, res = self.post("/api/ingest/event", {
-            "source": "ai-lab", "level": "critical", "kind": "GitOps", "key": "refused:prod:abc",
-            "title": "Refused unsigned image (production)", "text": "signature verification failed",
-            "technique": "T1195.002", "tactic": "Initial Access"})
+        code, res = self.post(
+            "/api/ingest/event",
+            {
+                "source": "ai-lab",
+                "level": "critical",
+                "kind": "GitOps",
+                "key": "refused:prod:abc",
+                "title": "Refused unsigned image (production)",
+                "text": "signature verification failed",
+                "technique": "T1195.002",
+                "tactic": "Initial Access",
+            },
+        )
         self.assertEqual(code, 200)
         a = sa.S.by_id[res["alert"]]
-        self.assertEqual((a["sev"], a["tech"], a["tac"], a["ext"]["from"]), ("critical", "T1195.002", "Initial Access", "GitOps"))
+        self.assertEqual(
+            (a["sev"], a["tech"], a["tac"], a["ext"]["from"]), ("critical", "T1195.002", "Initial Access", "GitOps")
+        )
         self.assertEqual(a["log"][0][1], "Reported by ai-lab")
         self.assertEqual(len(self.notified), 1)
 
