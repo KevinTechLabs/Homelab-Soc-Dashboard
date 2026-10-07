@@ -21,6 +21,7 @@ POST requests need the access key from /etc/sentinel/token in the X-Sentinel-Key
 
 Standard library only. Listens on 127.0.0.1:8765; nginx forwards /api/ to it.
 """
+
 import base64
 import collections
 import getpass
@@ -78,8 +79,20 @@ def run(cmd, timeout=10):
         return 127, "", str(e)
 
 
-LAN_NETS = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
-                                                 "169.254.0.0/16", "127.0.0.0/8", "fc00::/7", "fe80::/10", "::1/128")]
+LAN_NETS = [
+    ipaddress.ip_network(n)
+    for n in (
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+        "169.254.0.0/16",
+        "127.0.0.0/8",
+        "fc00::/7",
+        "fe80::/10",
+        "::1/128",
+    )
+]
 
 
 def is_private(ip):
@@ -115,8 +128,14 @@ PF_DEFAULTS = {"enabled": False, "host": "", "user": "admin", "iface": "wan", "p
 # Network zones (VLANs) shown as labels on the Devices tab. Anything else shows as its /24 network.
 # Set your own in /etc/sentinel/zones.json, e.g. {"10.20.1.0/24": "Main LAN", "10.20.10.0/24": "Trusted"}
 ZONES_FILE = os.environ.get("SENTINEL_ZONES_FILE", "/etc/sentinel/zones.json")
-DEFAULT_ZONES = [("10.20.1.0/24", "Main LAN"), ("10.20.10.0/24", "Trusted"), ("10.20.30.0/24", "Gaming & IoT"),
-                 ("10.20.40.0/24", "Lab"), ("10.20.50.0/24", "Guest"), ("10.20.99.0/24", "Management")]
+DEFAULT_ZONES = [
+    ("10.20.1.0/24", "Main LAN"),
+    ("10.20.10.0/24", "Trusted"),
+    ("10.20.30.0/24", "Gaming & IoT"),
+    ("10.20.40.0/24", "Lab"),
+    ("10.20.50.0/24", "Guest"),
+    ("10.20.99.0/24", "Management"),
+]
 
 
 def load_zones():
@@ -154,40 +173,61 @@ def zone_of(ip):
 PF_KEY = os.environ.get("SENTINEL_PF_KEY", "/etc/sentinel/pfsense_key")
 PF_KNOWN = os.path.join(os.path.dirname(PF_KEY), "pfsense_known_hosts")
 SSH_BIN = os.environ.get("SENTINEL_SSH", "ssh")
-NOTIFY_DEFAULTS = {"enabled": False, "minSev": "high", "summary": False, "summaryHour": 8,
-                   "tz": "", "webhook": "", "webhookName": "", "click": "", "lastSummary": ""}
+NOTIFY_DEFAULTS = {
+    "enabled": False,
+    "minSev": "high",
+    "summary": False,
+    "summaryHour": 8,
+    "tz": "",
+    "webhook": "",
+    "webhookName": "",
+    "click": "",
+    "lastSummary": "",
+}
 
 
 class Store:
     def __init__(self):
-        self.alerts = collections.OrderedDict()   # key -> alert
+        self.alerts = collections.OrderedDict()  # key -> alert
         self.by_id = {}
         self.seq = 1000
         self.events = collections.deque(maxlen=400)
         self.evseq = 0
         self.counts = collections.deque(maxlen=300000)  # (t, kind), kept 25 h for hourly totals and the daily summary
-        self.sources = {}          # ip -> info
-        self.known_logins = {}     # user -> [ip]
+        self.sources = {}  # ip -> info
+        self.known_logins = {}  # user -> [ip]
         self.baseline_ports = None
         self.settings = {"autoblock": False, "notify": dict(NOTIFY_DEFAULTS)}
         self.notify_status = ""
         self.settings["devices"] = {"notifyNew": True}
-        self.devices = {}          # mac -> home-network device
-        self.tailnet = {}          # node key -> Tailscale device
-        self.geo = {}              # ip -> location of an attacking address
+        self.devices = {}  # mac -> home-network device
+        self.tailnet = {}  # node key -> Tailscale device
+        self.geo = {}  # ip -> location of an attacking address
         self.gateway_mac = ""
         self.lan = {}
         self.settings["pfsense"] = dict(PF_DEFAULTS)
-        self.pf = {"lastLog": 0, "sshOk": None, "sshMsg": "", "edgeBlocked": set(), "lastCheck": 0, "recent": {},
-                   "nbrOk": None, "nbrMsg": "", "nbrLast": 0, "nbrCount": 0, "nbrSeen": False, "dhcpLast": 0}
+        self.pf = {
+            "lastLog": 0,
+            "sshOk": None,
+            "sshMsg": "",
+            "edgeBlocked": set(),
+            "lastCheck": 0,
+            "recent": {},
+            "nbrOk": None,
+            "nbrMsg": "",
+            "nbrLast": 0,
+            "nbrCount": 0,
+            "nbrSeen": False,
+            "dhcpLast": 0,
+        }
         # alerts pushed in from other systems (Prometheus Alertmanager, GitOps agents)
         self.ingest = {"watchdog": {}, "silent": {}, "last": 0, "received": 0, "sources": {}}
-        self.learning = True       # first run: learn existing logins/ports quietly
+        self.learning = True  # first run: learn existing logins/ports quietly
         self.dirty = False
         # rolling windows (not persisted)
-        self.fails = collections.defaultdict(collections.deque)      # ip -> (t, user)
-        self.fw_ports = collections.defaultdict(collections.deque)   # ip -> (t, port)
-        self.sudo_fails = collections.defaultdict(collections.deque) # user -> t
+        self.fails = collections.defaultdict(collections.deque)  # ip -> (t, user)
+        self.fw_ports = collections.defaultdict(collections.deque)  # ip -> (t, port)
+        self.sudo_fails = collections.defaultdict(collections.deque)  # user -> t
         # live system data
         self.metrics = {}
         self.rx = collections.deque(maxlen=150)
@@ -251,7 +291,11 @@ class Store:
         self.settings["notify"].update({k: v for k, v in st.get("notify", {}).items() if k in NOTIFY_DEFAULTS})
         cutoff = now_ms() - 7 * 86400000
         for s in d.get("sources", []):
-            if s.get("last", 0) > cutoff and not (s.get("lan") and not s.get("fails")) and not not_a_host(s.get("ip", "")):
+            if (
+                s.get("last", 0) > cutoff
+                and not (s.get("lan") and not s.get("fails"))
+                and not not_a_host(s.get("ip", ""))
+            ):
                 s["users"] = set(s.get("users", []))
                 s["ports"] = set(s.get("ports", []))
                 self.sources[s["ip"]] = s
@@ -274,8 +318,9 @@ class Store:
             "pf_last_log": self.pf.get("lastLog", 0),
             "ingest": {k: self.ingest[k] for k in ("watchdog", "silent", "sources")},
             "settings": self.settings,
-            "sources": [dict(s, users=sorted(s["users"])[:50], ports=sorted(s["ports"])[:50])
-                        for s in self.sources.values()],
+            "sources": [
+                dict(s, users=sorted(s["users"])[:50], ports=sorted(s["ports"])[:50]) for s in self.sources.values()
+            ],
         }
         os.makedirs(STATE_DIR, exist_ok=True)
         tmp = STATE_FILE + ".tmp"
@@ -297,8 +342,17 @@ def add_event(t, act, text, kind, hot=False):
 def source(ip, t):
     s = S.sources.get(ip)
     if not s:
-        s = {"ip": ip, "first": t, "last": t, "fails": 0, "blocks": 0, "users": set(),
-             "ports": set(), "lan": is_private(ip), "why": ""}
+        s = {
+            "ip": ip,
+            "first": t,
+            "last": t,
+            "fails": 0,
+            "blocks": 0,
+            "users": set(),
+            "ports": set(),
+            "lan": is_private(ip),
+            "why": "",
+        }
         S.sources[ip] = s
     s["last"] = max(s["last"], t)
     S.dirty = True
@@ -323,10 +377,25 @@ def upsert_alert(key, sev, title, tech, tac, det, t, src=None, user=None, count=
         S.dirty = True
         return a
     S.seq += 1
-    a = {"id": "SEN-%d" % S.seq, "key": key, "time": t, "last": t, "sev": sev, "t": title,
-         "tech": tech, "tac": tac, "det": det, "host": HOST, "src": src or "—", "user": user or "—",
-         "status": "new", "owner": None, "ackAt": None, "count": count or 1,
-         "log": [[t, "Detected by Sentinel agent"]]}
+    a = {
+        "id": "SEN-%d" % S.seq,
+        "key": key,
+        "time": t,
+        "last": t,
+        "sev": sev,
+        "t": title,
+        "tech": tech,
+        "tac": tac,
+        "det": det,
+        "host": HOST,
+        "src": src or "—",
+        "user": user or "—",
+        "status": "new",
+        "owner": None,
+        "ackAt": None,
+        "count": count or 1,
+        "log": [[t, "Detected by Sentinel agent"]],
+    }
     S.alerts[key] = a
     S.by_id[a["id"]] = a
     while len(S.alerts) > 300:
@@ -363,7 +432,13 @@ def on_ssh_fail(t, ip, user, invalid, count_it, backfill):
     if user:
         s["users"].add(user)
     s["why"] = "SSH login failures"
-    add_event(t, "FAIL", "SSH login failed for %s%s from %s" % ("invalid user " if invalid else "", user or "?", ip), "fail", hot=True)
+    add_event(
+        t,
+        "FAIL",
+        "SSH login failed for %s%s from %s" % ("invalid user " if invalid else "", user or "?", ip),
+        "fail",
+        hot=True,
+    )
     if not count_it:
         return
     dq = S.fails[ip]
@@ -373,14 +448,31 @@ def on_ssh_fail(t, ip, user, invalid, count_it, backfill):
     n5 = sum(1 for x in dq if x[0] > t - 300000)
     if n60 >= 5 or n5 >= 10:
         sev = "critical" if n5 >= 40 else "high"
-        upsert_alert("bf:%s:%d" % (ip, hour(t)), sev, "SSH brute-force attempt", "T1110.001",
-                     "Credential Access", "%d failed SSH logins in 5 minutes from %s" % (n5, ip),
-                     t, src=ip, user=user, count=s["fails"])
+        upsert_alert(
+            "bf:%s:%d" % (ip, hour(t)),
+            sev,
+            "SSH brute-force attempt",
+            "T1110.001",
+            "Credential Access",
+            "%d failed SSH logins in 5 minutes from %s" % (n5, ip),
+            t,
+            src=ip,
+            user=user,
+            count=s["fails"],
+        )
     users5 = {u for (tt, u) in dq if tt > t - 300000 and u}
     if len(users5) >= 4:
-        upsert_alert("sp:%s:%d" % (ip, hour(t)), "high", "Password spray across accounts", "T1110.003",
-                     "Credential Access", "%d different usernames tried from %s in 5 minutes (%s)"
-                     % (len(users5), ip, ", ".join(sorted(users5)[:6])), t, src=ip, count=len(users5))
+        upsert_alert(
+            "sp:%s:%d" % (ip, hour(t)),
+            "high",
+            "Password spray across accounts",
+            "T1110.003",
+            "Credential Access",
+            "%d different usernames tried from %s in 5 minutes (%s)" % (len(users5), ip, ", ".join(sorted(users5)[:6])),
+            t,
+            src=ip,
+            count=len(users5),
+        )
 
 
 def on_ssh_ok(t, ip, user, method, backfill):
@@ -388,18 +480,43 @@ def on_ssh_ok(t, ip, user, method, backfill):
     dq = S.fails.get(ip)
     recent = sum(1 for x in dq if x[0] > t - 30 * 60000) if dq else 0
     if recent >= 3:
-        upsert_alert("sf:%s:%s:%d" % (ip, user, hour(t)), "critical", "Login succeeded after repeated failures",
-                     "T1078", "Initial Access", "%s signed in from %s after %d failed attempts" % (user, ip, recent),
-                     t, src=ip, user=user)
+        upsert_alert(
+            "sf:%s:%s:%d" % (ip, user, hour(t)),
+            "critical",
+            "Login succeeded after repeated failures",
+            "T1078",
+            "Initial Access",
+            "%s signed in from %s after %d failed attempts" % (user, ip, recent),
+            t,
+            src=ip,
+            user=user,
+        )
     if user == "root":
-        upsert_alert("root:%s:%d" % (ip, t // 86400000), "high", "Direct root login over SSH", "T1078.003",
-                     "Privilege Escalation", "root signed in over SSH from %s using %s" % (ip, method), t, src=ip, user=user)
+        upsert_alert(
+            "root:%s:%d" % (ip, t // 86400000),
+            "high",
+            "Direct root login over SSH",
+            "T1078.003",
+            "Privilege Escalation",
+            "root signed in over SSH from %s using %s" % (ip, method),
+            t,
+            src=ip,
+            user=user,
+        )
     known = S.known_logins.setdefault(user, [])
     if ip not in known:
         if not (S.learning and backfill):
-            upsert_alert("new:%s:%s" % (user, ip), "medium" if not is_private(ip) else "low",
-                         "Sign-in from a new address", "T1078", "Initial Access",
-                         "%s signed in from %s for the first time (%s)" % (user, ip, method), t, src=ip, user=user)
+            upsert_alert(
+                "new:%s:%s" % (user, ip),
+                "medium" if not is_private(ip) else "low",
+                "Sign-in from a new address",
+                "T1078",
+                "Initial Access",
+                "%s signed in from %s for the first time (%s)" % (user, ip, method),
+                t,
+                src=ip,
+                user=user,
+            )
         known.append(ip)
         del known[:-50]
         S.dirty = True
@@ -411,9 +528,17 @@ def on_sudo_fail(t, user):
     dq.append((t,))
     prune(dq, t - 600000)
     if len(dq) >= 3:
-        upsert_alert("sudo:%s:%d" % (user, hour(t)), "medium", "Repeated sudo password failures", "T1548.003",
-                     "Privilege Escalation", "%d failed sudo/su password attempts by %s in 10 minutes" % (len(dq), user),
-                     t, user=user, count=len(dq))
+        upsert_alert(
+            "sudo:%s:%d" % (user, hour(t)),
+            "medium",
+            "Repeated sudo password failures",
+            "T1548.003",
+            "Privilege Escalation",
+            "%d failed sudo/su password attempts by %s in 10 minutes" % (len(dq), user),
+            t,
+            user=user,
+            count=len(dq),
+        )
 
 
 def is_broadcast(ip):
@@ -445,8 +570,17 @@ def on_ufw(t, src, dst, proto, dpt):
         ports = {p for (_, p) in dq}
         if len(ports) >= 10:
             s["why"] = "Port scanning"
-            upsert_alert("scan:%s:%d" % (src, hour(t)), "medium", "Port scan detected", "T1046", "Discovery",
-                         "%s probed %d different ports in 2 minutes" % (src, len(ports)), t, src=src, count=len(ports))
+            upsert_alert(
+                "scan:%s:%d" % (src, hour(t)),
+                "medium",
+                "Port scan detected",
+                "T1046",
+                "Discovery",
+                "%s probed %d different ports in 2 minutes" % (src, len(ports)),
+                t,
+                src=src,
+                count=len(ports),
+            )
 
 
 def handle_entry(e):
@@ -512,9 +646,20 @@ def journal_loop():
                 with LOCK:
                     add_event(now_ms(), "INFO", "journalctl not found; login and firewall monitoring is off", "system")
                 return
-            cmd = ["journalctl", "-f", "-o", "json", "--no-pager", "-n", "3000" if first else "0",
-                   "SYSLOG_IDENTIFIER=sshd", "SYSLOG_IDENTIFIER=sshd-session", "SYSLOG_IDENTIFIER=sudo",
-                   "SYSLOG_IDENTIFIER=su", "SYSLOG_IDENTIFIER=kernel"]
+            cmd = [
+                "journalctl",
+                "-f",
+                "-o",
+                "json",
+                "--no-pager",
+                "-n",
+                "3000" if first else "0",
+                "SYSLOG_IDENTIFIER=sshd",
+                "SYSLOG_IDENTIFIER=sshd-session",
+                "SYSLOG_IDENTIFIER=sudo",
+                "SYSLOG_IDENTIFIER=su",
+                "SYSLOG_IDENTIFIER=kernel",
+            ]
         first = False
         try:
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
@@ -589,7 +734,7 @@ def hex_addr(h, v6):
     port = int(port_hex, 16)
     b = bytes.fromhex(ip_hex)
     if v6:
-        b = b"".join(b[i:i + 4][::-1] for i in range(0, 16, 4))
+        b = b"".join(b[i : i + 4][::-1] for i in range(0, 16, 4))
         ip = socket.inet_ntop(socket.AF_INET6, b)
     else:
         ip = socket.inet_ntop(socket.AF_INET, b[::-1])
@@ -644,25 +789,69 @@ def socket_procs(inodes):
     return found
 
 
-PORT_NAMES = {22: "SSH", 80: "HTTP", 443: "HTTPS", 53: "DNS", 25: "SMTP", 587: "SMTP", 465: "SMTP",
-              993: "IMAP", 143: "IMAP", 445: "SMB", 139: "SMB", 3389: "RDP", 5900: "VNC", 11434: "Ollama",
-              3000: "Web app", 8080: "Web app", 8000: "Web app", 8088: "Sentinel", 9090: "Web app",
-              7860: "Web app", 8888: "Jupyter", 5432: "Postgres", 3306: "MySQL", 6379: "Redis",
-              27017: "MongoDB", 2375: "Docker", 2376: "Docker", 51820: "WireGuard", 41641: "Tailscale",
-              123: "NTP", 9100: "Metrics"}
+PORT_NAMES = {
+    22: "SSH",
+    80: "HTTP",
+    443: "HTTPS",
+    53: "DNS",
+    25: "SMTP",
+    587: "SMTP",
+    465: "SMTP",
+    993: "IMAP",
+    143: "IMAP",
+    445: "SMB",
+    139: "SMB",
+    3389: "RDP",
+    5900: "VNC",
+    11434: "Ollama",
+    3000: "Web app",
+    8080: "Web app",
+    8000: "Web app",
+    8088: "Sentinel",
+    9090: "Web app",
+    7860: "Web app",
+    8888: "Jupyter",
+    5432: "Postgres",
+    3306: "MySQL",
+    6379: "Redis",
+    27017: "MongoDB",
+    2375: "Docker",
+    2376: "Docker",
+    51820: "WireGuard",
+    41641: "Tailscale",
+    123: "NTP",
+    9100: "Metrics",
+}
 
 
 def port_name(p):
     return PORT_NAMES.get(p, "Other")
 
 
-WATCH = [("ssh", "Remote login (SSH)"), ("nginx", "Web server"), ("ufw", "Firewall"),
-         ("fail2ban", "Brute-force blocker"), ("docker", "Containers"), ("containerd", "Container runtime"),
-         ("ollama", "Local AI models"), ("open-webui", "AI web interface"), ("tailscaled", "Tailscale VPN"),
-         ("cron", "Scheduled jobs"), ("systemd-journald", "System log"), ("systemd-resolved", "DNS resolver"),
-         ("systemd-timesyncd", "Clock sync"), ("chrony", "Clock sync"), ("unattended-upgrades", "Automatic updates"),
-         ("smbd", "File sharing"), ("postgresql", "Database"), ("mysql", "Database"), ("redis-server", "Cache"),
-         ("apache2", "Web server"), ("caddy", "Web server"), ("sentinel-agent", "Sentinel agent")]
+WATCH = [
+    ("ssh", "Remote login (SSH)"),
+    ("nginx", "Web server"),
+    ("ufw", "Firewall"),
+    ("fail2ban", "Brute-force blocker"),
+    ("docker", "Containers"),
+    ("containerd", "Container runtime"),
+    ("ollama", "Local AI models"),
+    ("open-webui", "AI web interface"),
+    ("tailscaled", "Tailscale VPN"),
+    ("cron", "Scheduled jobs"),
+    ("systemd-journald", "System log"),
+    ("systemd-resolved", "DNS resolver"),
+    ("systemd-timesyncd", "Clock sync"),
+    ("chrony", "Clock sync"),
+    ("unattended-upgrades", "Automatic updates"),
+    ("smbd", "File sharing"),
+    ("postgresql", "Database"),
+    ("mysql", "Database"),
+    ("redis-server", "Cache"),
+    ("apache2", "Web server"),
+    ("caddy", "Web server"),
+    ("sentinel-agent", "Sentinel agent"),
+]
 
 
 def unit_files():
@@ -699,9 +888,15 @@ def sample_services():
     for r in res:
         prev = _svc_prev.get(r["name"])
         if prev == "active" and r["state"] in ("inactive", "failed"):
-            upsert_alert("svc:%s:%d" % (r["name"], hour(t)), "high" if r["state"] == "failed" else "medium",
-                         "Service stopped: " + r["name"], "T1489", "Impact",
-                         "%s (%s) changed from running to %s" % (r["name"], r["desc"], r["state"]), t)
+            upsert_alert(
+                "svc:%s:%d" % (r["name"], hour(t)),
+                "high" if r["state"] == "failed" else "medium",
+                "Service stopped: " + r["name"],
+                "T1489",
+                "Impact",
+                "%s (%s) changed from running to %s" % (r["name"], r["desc"], r["state"]),
+                t,
+            )
             add_event(t, "ALERT", "Service %s is now %s" % (r["name"], r["state"]), "system", hot=True)
         _svc_prev[r["name"]] = r["state"]
     return res
@@ -755,31 +950,58 @@ def ufw_status():
 def run_checks():
     res = []
     st = S.ufw_state
-    res.append({"id": "ufw", "name": "Firewall (ufw) is on", "ok": st == "active",
-                "detail": {"active": "Unsolicited traffic is blocked",
-                           "inactive": "Installed but turned off",
-                           "missing": "ufw is not installed"}.get(st, "Could not read firewall status")})
+    res.append(
+        {
+            "id": "ufw",
+            "name": "Firewall (ufw) is on",
+            "ok": st == "active",
+            "detail": {
+                "active": "Unsolicited traffic is blocked",
+                "inactive": "Installed but turned off",
+                "missing": "ufw is not installed",
+            }.get(st, "Could not read firewall status"),
+        }
+    )
     cfg = sshd_settings()
     if cfg:
         pa = cfg.get("passwordauthentication", "yes")
-        res.append({"id": "sshpw", "name": "SSH password logins are off", "ok": pa == "no",
-                    "detail": "Keys only" if pa == "no" else "Passwords are accepted, so brute force can work"})
+        res.append(
+            {
+                "id": "sshpw",
+                "name": "SSH password logins are off",
+                "ok": pa == "no",
+                "detail": "Keys only" if pa == "no" else "Passwords are accepted, so brute force can work",
+            }
+        )
         prl = cfg.get("permitrootlogin", "prohibit-password")
         ok = prl in ("no", "prohibit-password", "without-password", "forced-commands-only")
-        res.append({"id": "sshroot", "name": "Root can't log in with a password", "ok": ok,
-                    "detail": "PermitRootLogin " + prl})
+        res.append(
+            {"id": "sshroot", "name": "Root can't log in with a password", "ok": ok, "detail": "PermitRootLogin " + prl}
+        )
     rc, out, _ = run(["systemctl", "is-active", "fail2ban"])
     f2b = out.strip() == "active"
-    res.append({"id": "f2b", "name": "fail2ban is running", "ok": f2b,
-                "detail": "Bans addresses after failed logins" if f2b else "Not running (sudo apt install fail2ban)"})
+    res.append(
+        {
+            "id": "f2b",
+            "name": "fail2ban is running",
+            "ok": f2b,
+            "detail": "Bans addresses after failed logins" if f2b else "Not running (sudo apt install fail2ban)",
+        }
+    )
     auto = False
     try:
         with open("/etc/apt/apt.conf.d/20auto-upgrades") as f:
             auto = 'Unattended-Upgrade "1"' in f.read()
     except Exception:
         pass
-    res.append({"id": "auto", "name": "Automatic security updates", "ok": auto,
-                "detail": "Enabled" if auto else "Off (sudo dpkg-reconfigure unattended-upgrades)"})
+    res.append(
+        {
+            "id": "auto",
+            "name": "Automatic security updates",
+            "ok": auto,
+            "detail": "Enabled" if auto else "Off (sudo dpkg-reconfigure unattended-upgrades)",
+        }
+    )
     upd = None
     try:
         with open("/var/lib/update-notifier/updates-available") as f:
@@ -789,11 +1011,23 @@ def run_checks():
     except Exception:
         pass
     if upd is not None:
-        res.append({"id": "upd", "name": "System is up to date", "ok": upd == 0,
-                    "detail": "No pending updates" if upd == 0 else "%d updates waiting (sudo apt upgrade)" % upd})
+        res.append(
+            {
+                "id": "upd",
+                "name": "System is up to date",
+                "ok": upd == 0,
+                "detail": "No pending updates" if upd == 0 else "%d updates waiting (sudo apt upgrade)" % upd,
+            }
+        )
     reboot = os.path.exists("/var/run/reboot-required")
-    res.append({"id": "reboot", "name": "No reboot pending", "ok": not reboot,
-                "detail": "Reboot to finish installing updates" if reboot else "Running the latest installed kernel"})
+    res.append(
+        {
+            "id": "reboot",
+            "name": "No reboot pending",
+            "ok": not reboot,
+            "detail": "Reboot to finish installing updates" if reboot else "Running the latest installed kernel",
+        }
+    )
     return res
 
 
@@ -836,9 +1070,16 @@ def sampler_loop():
                 myips = my_addresses()
             with LOCK:
                 t = now_ms()
-                S.metrics = {"cpu": round(cpu, 1), "memUsed": mu * 1024, "memTotal": mt * 1024,
-                             "diskUsed": du.used, "diskTotal": du.total, "load": [round(x, 2) for x in load],
-                             "cores": os.cpu_count() or 1, "uptime": int(up)}
+                S.metrics = {
+                    "cpu": round(cpu, 1),
+                    "memUsed": mu * 1024,
+                    "memTotal": mt * 1024,
+                    "diskUsed": du.used,
+                    "diskTotal": du.total,
+                    "load": [round(x, 2) for x in load],
+                    "cores": os.cpu_count() or 1,
+                    "uptime": int(up),
+                }
                 S.iface = iface
                 S.rx.append(round(rx, 3))
                 S.tx.append(round(tx, 3))
@@ -849,11 +1090,25 @@ def sampler_loop():
                     S.services = services
                 cpu_hot = cpu_hot + 1 if cpu > 90 else 0
                 if cpu_hot == 90:  # about 3 minutes
-                    upsert_alert("cpu:%d" % hour(t), "low", "Sustained high CPU usage", "T1496", "Impact",
-                                 "CPU above 90%% for 3 minutes (load %.2f)" % load[0], t)
+                    upsert_alert(
+                        "cpu:%d" % hour(t),
+                        "low",
+                        "Sustained high CPU usage",
+                        "T1496",
+                        "Impact",
+                        "CPU above 90%% for 3 minutes (load %.2f)" % load[0],
+                        t,
+                    )
                 if tick % 15 == 1 and du.total and du.used / du.total > 0.9:
-                    upsert_alert("disk:%d" % (t // 86400000), "medium", "Disk almost full", "T1499", "Impact",
-                                 "/ is %d%% full" % round(du.used / du.total * 100), t)
+                    upsert_alert(
+                        "disk:%d" % (t // 86400000),
+                        "medium",
+                        "Disk almost full",
+                        "T1499",
+                        "Impact",
+                        "/ is %d%% full" % round(du.used / du.total * 100),
+                        t,
+                    )
                 if socks is not None:
                     listen = [s for s in socks if s[0] == "0A"]
                     est = [s for s in socks if s[0] == "01"]
@@ -868,8 +1123,16 @@ def sampler_loop():
                         svc = port_name(lp if inbound else rp)
                         protos[svc] += 1
                         cur.add((lip, lp, rip, rp))
-                        peers.append({"ip": rip, "port": rp, "lport": lp, "dir": "in" if inbound else "out",
-                                      "svc": svc, "lan": is_private(rip)})
+                        peers.append(
+                            {
+                                "ip": rip,
+                                "port": rp,
+                                "lport": lp,
+                                "dir": "in" if inbound else "out",
+                                "svc": svc,
+                                "lan": is_private(rip),
+                            }
+                        )
                     for c in cur - seen_conns:
                         S.new_conns.append(t)
                     seen_conns = cur
@@ -890,8 +1153,15 @@ def sampler_loop():
                         if k in seen:
                             continue
                         seen.add(k)
-                        rows.append({"port": lp, "addr": lip, "proc": listen_procs.get(ino, "?"),
-                                     "exposed": exposed, "svc": port_name(lp)})
+                        rows.append(
+                            {
+                                "port": lp,
+                                "addr": lip,
+                                "proc": listen_procs.get(ino, "?"),
+                                "exposed": exposed,
+                                "svc": port_name(lp),
+                            }
+                        )
                     rows.sort(key=lambda r: (not r["exposed"], r["port"]))
                     S.net["listening"] = rows
                     exposed_now = {r["port"] for r in rows if r["exposed"]}
@@ -901,11 +1171,22 @@ def sampler_loop():
                     else:
                         for r in rows:
                             if r["exposed"] and r["port"] not in S.baseline_ports:
-                                upsert_alert("port:%d" % r["port"], "medium", "New service listening on the network",
-                                             "T1543", "Persistence",
-                                             "%s started listening on port %d (%s)" % (r["proc"], r["port"], r["addr"]),
-                                             now_ms())
-                                add_event(now_ms(), "ALERT", "New listening port %d (%s)" % (r["port"], r["proc"]), "system", hot=True)
+                                upsert_alert(
+                                    "port:%d" % r["port"],
+                                    "medium",
+                                    "New service listening on the network",
+                                    "T1543",
+                                    "Persistence",
+                                    "%s started listening on port %d (%s)" % (r["proc"], r["port"], r["addr"]),
+                                    now_ms(),
+                                )
+                                add_event(
+                                    now_ms(),
+                                    "ALERT",
+                                    "New listening port %d (%s)" % (r["port"], r["proc"]),
+                                    "system",
+                                    hot=True,
+                                )
                                 S.baseline_ports.add(r["port"])
                                 S.dirty = True
             if tick % 150 == 1:
@@ -942,7 +1223,11 @@ def ufw_block(ip):
     if rc != 0:
         return False, (err or out).strip() or "ufw refused the rule"
     S.blocked.add(ip)
-    note = "" if S.ufw_state == "active" else " The rule is saved, but ufw is off, so it won't take effect until you turn ufw on."
+    note = (
+        ""
+        if S.ufw_state == "active"
+        else " The rule is saved, but ufw is off, so it won't take effect until you turn ufw on."
+    )
     return True, "%s blocked.%s" % (ip, note)
 
 
@@ -987,7 +1272,12 @@ def autoblock_loop():
                 a = S.alerts.get(key)
                 if a:
                     a["log"].append([t, ("Automatically blocked: " + msg) if ok else ("Auto-block failed: " + msg)])
-                add_event(t, "DROP" if ok else "INFO", ("Auto-blocked %s" % ip) if ok else ("Auto-block failed for %s" % ip), "system")
+                add_event(
+                    t,
+                    "DROP" if ok else "INFO",
+                    ("Auto-blocked %s" % ip) if ok else ("Auto-block failed for %s" % ip),
+                    "system",
+                )
                 S.dirty = True
 
 
@@ -1023,9 +1313,26 @@ def pf_ssh(cmd, timeout=25):
         return 1, "", "Sentinel couldn't work out your router's address. Enter it on the pfSense card."
     if not os.path.exists(PF_KEY):
         return 1, "", "No SSH key yet."
-    return run([SSH_BIN, "-i", PF_KEY, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "UserKnownHostsFile=" + PF_KNOWN, "-o", "ConnectTimeout=8", "-o", "LogLevel=ERROR",
-                "%s@%s" % (pf.get("user") or "admin", host), cmd], timeout)
+    return run(
+        [
+            SSH_BIN,
+            "-i",
+            PF_KEY,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "UserKnownHostsFile=" + PF_KNOWN,
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "LogLevel=ERROR",
+            "%s@%s" % (pf.get("user") or "admin", host),
+            cmd,
+        ],
+        timeout,
+    )
 
 
 def pf_explain(rc, out, err):
@@ -1067,9 +1374,11 @@ def pf_check():
     return ok, S.pf["sshMsg"]
 
 
-PF_NBR_CMD = ("arp -an; echo \"@@WAN@@ $(route -n get default 2>/dev/null | awk '/interface:/{print $2}')\"; "
-              "echo @@ISC@@; cat /var/dhcpd/var/db/dhcpd.leases 2>/dev/null; "
-              "echo @@KEA@@; cat /var/lib/kea/dhcp4.leases 2>/dev/null; echo @@END@@")
+PF_NBR_CMD = (
+    "arp -an; echo \"@@WAN@@ $(route -n get default 2>/dev/null | awk '/interface:/{print $2}')\"; "
+    "echo @@ISC@@; cat /var/dhcpd/var/db/dhcpd.leases 2>/dev/null; "
+    "echo @@KEA@@; cat /var/lib/kea/dhcp4.leases 2>/dev/null; echo @@END@@"
+)
 RX_ARP = re.compile(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5}) on (\S+)(.*)")
 RX_MAC = re.compile(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 
@@ -1132,7 +1441,9 @@ def pf_neighbors():
         if ok:
             S.pf["nbrLast"], S.pf["nbrCount"], S.pf["nbrMsg"] = t, len(found), ""
         else:
-            S.pf["nbrMsg"] = pf_explain(rc, out, err) if rc != 0 else "pfSense answered, but its device list couldn't be read."
+            S.pf["nbrMsg"] = (
+                pf_explain(rc, out, err) if rc != 0 else "pfSense answered, but its device list couldn't be read."
+            )
     return ok, found
 
 
@@ -1188,7 +1499,9 @@ def block_ip(ip):
         if ok:
             return True, msg
         ok2, msg2 = ufw_block(ip)
-        return ok2, ("pfSense didn't take the block (%s) so %s was blocked on this server only." % (msg.rstrip("."), ip)) if ok2 else msg2
+        return ok2, (
+            "pfSense didn't take the block (%s) so %s was blocked on this server only." % (msg.rstrip("."), ip)
+        ) if ok2 else msg2
     return ufw_block(ip)
 
 
@@ -1215,7 +1528,7 @@ def not_a_host(ip):
         return True
 
 
-STRAY_UDP_SPORTS ={"53", "123", "443", "853", "3478", "5349", "19302"}
+STRAY_UDP_SPORTS = {"53", "123", "443", "853", "3478", "5349", "19302"}
 
 
 def is_stray(proto, rest):
@@ -1275,10 +1588,21 @@ def pf_filterlog(msg, t):
         r["n"] += 1
         r["ports"].add(dport or proto)
         r["ev"]["t"] = t
-        r["ev"]["text"] = "Router blocked %s ×%d (%s) on %s" % (src, r["n"], ", ".join(sorted(r["ports"], key=str)[:6]), iface)
+        r["ev"]["text"] = "Router blocked %s ×%d (%s) on %s" % (
+            src,
+            r["n"],
+            ", ".join(sorted(r["ports"], key=str)[:6]),
+            iface,
+        )
     else:
         S.evseq += 1
-        ev = {"id": S.evseq, "t": t, "act": "DROP", "text": "Router blocked %s → %s%s %s (%s)" % (src, dst, ":" + dport if dport else "", proto.upper(), iface), "hot": False}
+        ev = {
+            "id": S.evseq,
+            "t": t,
+            "act": "DROP",
+            "text": "Router blocked %s → %s%s %s (%s)" % (src, dst, ":" + dport if dport else "", proto.upper(), iface),
+            "hot": False,
+        }
         S.events.append(ev)
         S.pf["recent"][src] = {"first": t, "n": 1, "ports": {dport or proto}, "ev": ev}
         if len(S.pf["recent"]) > 500:
@@ -1291,9 +1615,17 @@ def pf_filterlog(msg, t):
         ports = {p for (_, p) in dq}
         if len(ports) >= 25:
             s["why"] = "Port scanning (stopped at the router)"
-            upsert_alert("pfscan:%s:%d" % (src, hour(t)), "low", "Port scan stopped at the router", "T1046", "Discovery",
-                         "%s probed %d ports on your network in 2 minutes. pfSense blocked all of them" % (src, len(ports)),
-                         t, src=src, count=len(ports))
+            upsert_alert(
+                "pfscan:%s:%d" % (src, hour(t)),
+                "low",
+                "Port scan stopped at the router",
+                "T1046",
+                "Discovery",
+                "%s probed %d ports on your network in 2 minutes. pfSense blocked all of them" % (src, len(ports)),
+                t,
+                src=src,
+                count=len(ports),
+            )
     S.dirty = True
     return True
 
@@ -1333,7 +1665,7 @@ def pf_loop():
         time.sleep(600)
 
 
-PF_SILENT_MS = 30 * 60000   # pfSense normally logs every few seconds; half an hour of silence means the feed broke
+PF_SILENT_MS = 30 * 60000  # pfSense normally logs every few seconds; half an hour of silence means the feed broke
 
 
 def log_watch_loop():
@@ -1349,11 +1681,19 @@ def log_watch_loop():
                 if last and not since and t - max(last, START_MS) > PF_SILENT_MS:
                     S.pf["silentSince"] = last
                     mins = (t - last) // 60000
-                    upsert_alert("logsilent:pf:%d" % last, "high", "pfSense logs stopped arriving", "T1562.006", "Defense Evasion",
-                                 "No firewall or DHCP logs from pfSense for %d minutes (last one at %s). Until they resume, Sentinel can't see "
-                                 "router blocks, port scans stopped at the router, or devices joining other zones. If nothing changed on purpose, "
-                                 "restart remote logging in pfSense: Status \u2192 System Logs \u2192 Settings, untick and re-tick Enable Remote Logging, "
-                                 "then Save. Someone switching off logging is also how attackers hide." % (mins, time.strftime("%H:%M", time.localtime(last / 1000))), t)
+                    upsert_alert(
+                        "logsilent:pf:%d" % last,
+                        "high",
+                        "pfSense logs stopped arriving",
+                        "T1562.006",
+                        "Defense Evasion",
+                        "No firewall or DHCP logs from pfSense for %d minutes (last one at %s). Until they resume, Sentinel can't see "
+                        "router blocks, port scans stopped at the router, or devices joining other zones. If nothing changed on purpose, "
+                        "restart remote logging in pfSense: Status \u2192 System Logs \u2192 Settings, untick and re-tick Enable Remote Logging, "
+                        "then Save. Someone switching off logging is also how attackers hide."
+                        % (mins, time.strftime("%H:%M", time.localtime(last / 1000))),
+                        t,
+                    )
                     add_event(t, "ALERT", "pfSense logs stopped arriving (silent %d min)" % mins, "system", hot=True)
                 elif since and last > since:
                     gap = (last - since) // 60000
@@ -1387,10 +1727,31 @@ def log_watch_loop():
 
 INGEST_MAX_BYTES = 131072
 WATCHDOG_SILENT_MS = int(os.environ.get("SENTINEL_WATCHDOG_SILENT_MIN", "5")) * 60000
-TACTICS = ("Initial Access", "Execution", "Persistence", "Privilege Escalation", "Defense Evasion",
-           "Credential Access", "Discovery", "Lateral Movement", "Command and Control", "Exfiltration", "Impact")
-EXT_SEV = {"critical": "critical", "page": "high", "high": "high", "error": "high", "warn": "medium",
-           "warning": "medium", "medium": "medium", "info": "low", "low": "low", "none": "low"}
+TACTICS = (
+    "Initial Access",
+    "Execution",
+    "Persistence",
+    "Privilege Escalation",
+    "Defense Evasion",
+    "Credential Access",
+    "Discovery",
+    "Lateral Movement",
+    "Command and Control",
+    "Exfiltration",
+    "Impact",
+)
+EXT_SEV = {
+    "critical": "critical",
+    "page": "high",
+    "high": "high",
+    "error": "high",
+    "warn": "medium",
+    "warning": "medium",
+    "medium": "medium",
+    "info": "low",
+    "low": "low",
+    "none": "low",
+}
 RX_TECH = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 RX_SOURCE = re.compile(r"[^A-Za-z0-9._:-]")
 
@@ -1439,9 +1800,15 @@ def notify_resolved(a, t):
     limit = "critical" if n.get("minSev") == "critical" else "high"
     if SEV_RANK[a["sev"]] > SEV_RANK[limit]:
         return
-    enqueue({"title": "✅ RESOLVED: %s" % a["t"], "description": a["det"].split(". ")[0] + ".",
-             "color": 0x3FB37F, "footer": {"text": "%s · %s" % (a.get("host", HOST), a["id"])},
-             "timestamp": iso(t)})
+    enqueue(
+        {
+            "title": "✅ RESOLVED: %s" % a["t"],
+            "description": a["det"].split(". ")[0] + ".",
+            "color": 0x3FB37F,
+            "footer": {"text": "%s · %s" % (a.get("host", HOST), a["id"])},
+            "timestamp": iso(t),
+        }
+    )
 
 
 def close_ext(a, t, why):
@@ -1484,24 +1851,34 @@ def ingest_alertmanager(body, t):
             if clean(al.get("status"), 16) == "resolved":
                 # Prometheus stopped evaluating rules (or was restarted with
                 # them removed): don't wait for the silence timer.
-                raise_silence(src, S.ingest["watchdog"].get(src, t), t,
-                              "Alertmanager reports the Watchdog heartbeat ended, so Prometheus on %s "
-                              "has stopped evaluating alert rules" % src)
+                raise_silence(
+                    src,
+                    S.ingest["watchdog"].get(src, t),
+                    t,
+                    "Alertmanager reports the Watchdog heartbeat ended, so Prometheus on %s "
+                    "has stopped evaluating alert rules" % src,
+                )
             else:
                 watchdog_seen(src, t)
                 beats += 1
             continue
-        fp = clean(al.get("fingerprint"), 32) or hashlib.sha1(
-            json.dumps(labels, sort_keys=True).encode()).hexdigest()[:16]
+        fp = (
+            clean(al.get("fingerprint"), 32)
+            or hashlib.sha1(json.dumps(labels, sort_keys=True).encode()).hexdigest()[:16]
+        )
         started = rfc3339_ms(al.get("startsAt"), t)
-        key = "am:%s:%s:%d" % (src, fp, started)       # a new firing episode gets a new alert
+        key = "am:%s:%s:%d" % (src, fp, started)  # a new firing episode gets a new alert
         status = clean(al.get("status"), 16)
         env = labels.get("env")
         title = clean("%s%s" % (name, " (%s)" % env if env else ""), 120)
         if status == "resolved":
             a = S.alerts.get(key)
-            if a and close_ext(a, t, "Resolved: Alertmanager reports it cleared after %d minutes"
-                               % max(0, (rfc3339_ms(al.get("endsAt"), t) - started) // 60000)):
+            if a and close_ext(
+                a,
+                t,
+                "Resolved: Alertmanager reports it cleared after %d minutes"
+                % max(0, (rfc3339_ms(al.get("endsAt"), t) - started) // 60000),
+            ):
                 add_event(t, "INFO", "%s cleared on %s" % (title, src), "system")
                 closed += 1
             continue
@@ -1517,8 +1894,10 @@ def ingest_alertmanager(body, t):
         if is_new:
             a["time"] = started  # but show when the problem really began
         a["host"] = src
-        a["ext"] = {"from": "Prometheus", "labels": {k: v for k, v in labels.items()
-                                                     if k not in ("alertname", "severity", "host")}}
+        a["ext"] = {
+            "from": "Prometheus",
+            "labels": {k: v for k, v in labels.items() if k not in ("alertname", "severity", "host")},
+        }
         url = clean(al.get("generatorURL"), 300)
         if url.startswith(("http://", "https://")):
             a["ext"]["url"] = url
@@ -1542,8 +1921,13 @@ def ingest_event(body, t):
     src = ext_source(body.get("source") or "event")
     text = clean(body.get("text") or title, 800)
     note_source(src, "event", t)
-    add_event(t, "ALERT" if level in ("high", "critical") else "INFO", "%s: %s" % (src, text), "system",
-              hot=level in ("high", "critical"))
+    add_event(
+        t,
+        "ALERT" if level in ("high", "critical") else "INFO",
+        "%s: %s" % (src, text),
+        "system",
+        hot=level in ("high", "critical"),
+    )
     if level == "info":
         return {"alert": None}
     labels = {"mitre_technique": clean(body.get("technique"), 16), "mitre_tactic": clean(body.get("tactic"), 32)}
@@ -1564,13 +1948,19 @@ def raise_silence(src, last, t, why=None):
     S.ingest["silent"][src] = last
     mins = max(0, (t - last) // 60000)
     why = why or "No heartbeat from Prometheus/Alertmanager on %s for %d minutes" % (src, mins)
-    a = upsert_alert("watchdog:%s:%d" % (src, last), "high", "Monitoring on %s stopped reporting" % src,
-                     "T1562.006", "Defense Evasion",
-                     "%s (last heartbeat at %s). Either the machine is down or offline, its monitoring stack "
-                     "stopped, or the network path to Sentinel broke. Until it returns, no alerts from %s can "
-                     "reach you. Check that the host is up, run `docker compose ps` in deploy/observability, and "
-                     "test that it can reach this server" % (why, time.strftime("%H:%M", time.localtime(last / 1000)), src),
-                     t, src=src)
+    a = upsert_alert(
+        "watchdog:%s:%d" % (src, last),
+        "high",
+        "Monitoring on %s stopped reporting" % src,
+        "T1562.006",
+        "Defense Evasion",
+        "%s (last heartbeat at %s). Either the machine is down or offline, its monitoring stack "
+        "stopped, or the network path to Sentinel broke. Until it returns, no alerts from %s can "
+        "reach you. Check that the host is up, run `docker compose ps` in deploy/observability, and "
+        "test that it can reach this server" % (why, time.strftime("%H:%M", time.localtime(last / 1000)), src),
+        t,
+        src=src,
+    )
     a["host"] = src
     a["ext"] = {"from": "Watchdog"}
     a["log"][0] = [t, "Raised by Sentinel's heartbeat watchdog"]
@@ -1601,10 +1991,21 @@ def watchdog_loop():
 
 
 def ingest_snapshot(t):
-    return {"received": S.ingest["received"], "last": S.ingest["last"],
-            "sources": [{"name": k, "kind": v.get("kind"), "last": v.get("last"), "count": v.get("count", 0),
-                         "watchdog": S.ingest["watchdog"].get(k), "silent": k in S.ingest["silent"]}
-                        for k, v in sorted(S.ingest["sources"].items())]}
+    return {
+        "received": S.ingest["received"],
+        "last": S.ingest["last"],
+        "sources": [
+            {
+                "name": k,
+                "kind": v.get("kind"),
+                "last": v.get("last"),
+                "count": v.get("count", 0),
+                "watchdog": S.ingest["watchdog"].get(k),
+                "silent": k in S.ingest["silent"],
+            }
+            for k, v in sorted(S.ingest["sources"].items())
+        ],
+    }
 
 
 def valid_ip(ip):
@@ -1616,7 +2017,7 @@ def valid_ip(ip):
 NOTIFY_Q = collections.deque(maxlen=100)
 NOTIFY_EVT = threading.Event()
 SEV_COLOR = {"critical": 0xFF5C63, "high": 0xFF8C42, "medium": 0xE9C84A, "low": 0x8AA7C7}
-SEV_ICON = {"critical": "\U0001F6A8", "high": "⚠️"}
+SEV_ICON = {"critical": "\U0001f6a8", "high": "⚠️"}
 RX_WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$")
 UA = "DiscordBot (https://github.com/sentinel-agent, %s)" % VERSION
 _sent = collections.deque()
@@ -1652,9 +2053,14 @@ def maybe_notify(a, t, always=False):
     if a.get("user") and a["user"] != "—":
         fields.append({"name": "User", "value": a["user"], "inline": True})
     fields.append({"name": "MITRE ATT&CK", "value": "%s · %s" % (a["tech"], a["tac"]), "inline": True})
-    embed = {"title": ("%s %s: %s" % (SEV_ICON.get(a["sev"], "\U0001F4E1"), a["sev"].upper(), a["t"])).strip(),
-             "description": a["det"] + ".", "color": SEV_COLOR[a["sev"]], "fields": fields,
-             "footer": {"text": "%s · %s" % (HOST, a["id"])}, "timestamp": iso(a["last"])}
+    embed = {
+        "title": ("%s %s: %s" % (SEV_ICON.get(a["sev"], "\U0001f4e1"), a["sev"].upper(), a["t"])).strip(),
+        "description": a["det"] + ".",
+        "color": SEV_COLOR[a["sev"]],
+        "fields": fields,
+        "footer": {"text": "%s · %s" % (HOST, a["id"])},
+        "timestamp": iso(a["last"]),
+    }
     if a.get("src") and a["src"] != "—" and not is_private(a["src"]):
         embed["_ip"] = a["src"]
     enqueue(embed)
@@ -1664,8 +2070,9 @@ def discord_request(url, payload=None):
     if os.environ.get("SENTINEL_DISCORD_BASE"):  # testing hook: send to a local stand-in for discord.com
         url = re.sub(r"^https://[^/]+", os.environ["SENTINEL_DISCORD_BASE"], url)
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(url, data=data, method="POST" if data else "GET",
-                                 headers={"Content-Type": "application/json", "User-Agent": UA})
+    req = urllib.request.Request(
+        url, data=data, method="POST" if data else "GET", headers={"Content-Type": "application/json", "User-Agent": UA}
+    )
     with urllib.request.urlopen(req, timeout=15) as r:
         body = r.read()
         return json.loads(body) if body else {}
@@ -1675,8 +2082,7 @@ def discord_send(n, embed):
     embed = dict(embed)
     if n.get("click") and "url" not in embed:
         embed["url"] = n["click"]
-    discord_request(n["webhook"], {"username": "Sentinel", "embeds": [embed],
-                                   "allowed_mentions": {"parse": []}})
+    discord_request(n["webhook"], {"username": "Sentinel", "embeds": [embed], "allowed_mentions": {"parse": []}})
 
 
 def describe_error(ex):
@@ -1709,7 +2115,9 @@ def notifier_loop():
                     except Exception:
                         g = None
                 if g:
-                    embed["fields"] = embed.get("fields", []) + [{"name": "Location", "value": geo_text(g), "inline": False}]
+                    embed["fields"] = embed.get("fields", []) + [
+                        {"name": "Location", "value": geo_text(g), "inline": False}
+                    ]
             now = time.time()
             while _sent and _sent[0] < now - 300:
                 _sent.popleft()
@@ -1717,7 +2125,10 @@ def notifier_loop():
                 _held[0] += 1
                 continue
             if not force and _held[0]:
-                embed["description"] += "\n\n*+%d more alerts were held back so the channel isn't flooded. Open Sentinel to see them.*" % _held[0]
+                embed["description"] += (
+                    "\n\n*+%d more alerts were held back so the channel isn't flooded. Open Sentinel to see them.*"
+                    % _held[0]
+                )
                 _held[0] = 0
             with LOCK:
                 n = dict(S.settings.get("notify") or {})
@@ -1740,6 +2151,7 @@ def user_tz(n):
     if tzname:
         try:
             from zoneinfo import ZoneInfo
+
             return ZoneInfo(tzname)
         except Exception:
             pass
@@ -1755,29 +2167,67 @@ def summary_embed(t):
     urgent = [a for a in open_ if a["sev"] in ("critical", "high")]
     bad = [ck["name"] for ck in S.checks if not ck.get("ok")]
     down = [sv["name"] for sv in S.services if sv["state"] in ("inactive", "failed")]
-    top = sorted((s for s in S.sources.values() if s["last"] > day and not s["lan"]),
-                 key=lambda s: s["fails"] + s["blocks"], reverse=True)[:3]
+    top = sorted(
+        (s for s in S.sources.values() if s["last"] > day and not s["lan"]),
+        key=lambda s: s["fails"] + s["blocks"],
+        reverse=True,
+    )[:3]
     fields = [
-        {"name": "New alerts", "value": ", ".join("%d %s" % (by[s], s) for s in ("critical", "high", "medium", "low") if by[s]) or "None", "inline": True},
-        {"name": "Open alerts", "value": "%d%s" % (len(open_), " (%d critical/high)" % len(urgent) if urgent else ""), "inline": True},
+        {
+            "name": "New alerts",
+            "value": ", ".join("%d %s" % (by[s], s) for s in ("critical", "high", "medium", "low") if by[s]) or "None",
+            "inline": True,
+        },
+        {
+            "name": "Open alerts",
+            "value": "%d%s" % (len(open_), " (%d critical/high)" % len(urgent) if urgent else ""),
+            "inline": True,
+        },
         {"name": "Failed logins", "value": str(c["fail"]), "inline": True},
         {"name": "Firewall blocks", "value": str(c["drop"]), "inline": True},
         {"name": "Your logins", "value": str(c["login"]), "inline": True},
     ]
     m = S.metrics
     if m.get("diskTotal"):
-        fields.append({"name": "Disk", "value": "%d%% full" % round(m["diskUsed"] / m["diskTotal"] * 100), "inline": True})
+        fields.append(
+            {"name": "Disk", "value": "%d%% full" % round(m["diskUsed"] / m["diskTotal"] * 100), "inline": True}
+        )
     if top:
-        fields.append({"name": "Most active attackers", "value": "\n".join(
-            "`%s` %d hits%s" % (s["ip"], s["fails"] + s["blocks"], " (blocked)" if s["ip"] in S.blocked else "") for s in top), "inline": False})
-    fields.append({"name": "Security checks", "value": "All passing" if not bad else "\n".join("❗ " + b for b in bad), "inline": False})
-    fields.append({"name": "Services", "value": "All running" if not down else "Not running: " + ", ".join(down), "inline": False})
+        fields.append(
+            {
+                "name": "Most active attackers",
+                "value": "\n".join(
+                    "`%s` %d hits%s" % (s["ip"], s["fails"] + s["blocks"], " (blocked)" if s["ip"] in S.blocked else "")
+                    for s in top
+                ),
+                "inline": False,
+            }
+        )
+    fields.append(
+        {
+            "name": "Security checks",
+            "value": "All passing" if not bad else "\n".join("❗ " + b for b in bad),
+            "inline": False,
+        }
+    )
+    fields.append(
+        {"name": "Services", "value": "All running" if not down else "Not running: " + ", ".join(down), "inline": False}
+    )
     issues = len(urgent) + len(bad) + len(down)
     calm = issues == 0
-    return {"title": "\U0001F6E1️ Daily summary: %s" % ("all quiet" if calm else "%d thing%s need%s a look" % (issues, "" if issues == 1 else "s", "s" if issues == 1 else "")),
-            "description": "The last 24 hours on **%s**." % HOST, "color": 0x3FD18E if calm else 0xE9C84A,
-            "fields": fields, "footer": {"text": "%s · up %d days" % (HOST, m.get("uptime", 0) // 86400)},
-            "timestamp": iso(t)}
+    return {
+        "title": "\U0001f6e1️ Daily summary: %s"
+        % (
+            "all quiet"
+            if calm
+            else "%d thing%s need%s a look" % (issues, "" if issues == 1 else "s", "s" if issues == 1 else "")
+        ),
+        "description": "The last 24 hours on **%s**." % HOST,
+        "color": 0x3FD18E if calm else 0xE9C84A,
+        "fields": fields,
+        "footer": {"text": "%s · up %d days" % (HOST, m.get("uptime", 0) // 86400)},
+        "timestamp": iso(t),
+    }
 
 
 def summary_loop():
@@ -1820,6 +2270,7 @@ def update_notify(body):
     if tzname:
         try:
             from zoneinfo import ZoneInfo
+
             ZoneInfo(tzname)
             n["tz"] = tzname
         except Exception:
@@ -1833,9 +2284,12 @@ def update_notify(body):
 # --------------------------------------------------------------------------- attacker locations
 def geo_lookup(ips):
     """Look up country/city/network owner for public attacker addresses (ip-api.com, free, no key)."""
-    req = urllib.request.Request("http://ip-api.com/batch?fields=status,query,country,countryCode,city,isp,org,as",
-                                 data=json.dumps(ips[:100]).encode(), method="POST",
-                                 headers={"Content-Type": "application/json", "User-Agent": "Sentinel/" + VERSION})
+    req = urllib.request.Request(
+        "http://ip-api.com/batch?fields=status,query,country,countryCode,city,isp,org,as",
+        data=json.dumps(ips[:100]).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json", "User-Agent": "Sentinel/" + VERSION},
+    )
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
@@ -1843,8 +2297,13 @@ def geo_lookup(ips):
 def geo_parse(r):
     if not r or r.get("status") != "success":
         return None
-    return {"cc": r.get("countryCode", ""), "country": r.get("country", ""), "city": r.get("city", ""),
-            "org": r.get("org") or r.get("isp") or "", "as": (r.get("as") or "").split(" ")[0]}
+    return {
+        "cc": r.get("countryCode", ""),
+        "country": r.get("country", ""),
+        "city": r.get("city", ""),
+        "org": r.get("org") or r.get("isp") or "",
+        "as": (r.get("as") or "").split(" ")[0],
+    }
 
 
 def flag(cc):
@@ -1879,18 +2338,78 @@ def geo_loop():
 # --------------------------------------------------------------------------- home network devices
 # port -> (level, what it is, what to do, ATT&CK technique)
 RISK_PORTS = {
-    23: ("high", "Telnet is open", "Telnet sends passwords in plain text and is the favourite way in for botnets like Mirai. Turn it off in the device's settings or update its firmware. If you can't, consider replacing the device.", "T1021"),
-    2323: ("high", "Telnet (alternate port) is open", "Often a hidden service on cheap cameras and smart plugs. Update the firmware, and if it stays open, keep the device off your main network.", "T1021"),
-    7547: ("high", "Remote management (TR-069) is open", "This is a router/modem management port that attackers scan for. Check for a firmware update or ask your internet provider.", "T1133"),
-    21: ("medium", "FTP file transfer is open", "FTP sends passwords in plain text. Turn it off if you don't use it, or switch to SFTP.", "T1021"),
-    5900: ("medium", "Screen sharing (VNC) is open", "Make sure it has a strong password, or turn it off when you're not using it.", "T1021.005"),
-    3389: ("medium", "Remote Desktop is open", "Fine for your own PC on your home network. Use a strong password and keep Windows updated.", "T1021.001"),
-    1883: ("medium", "Smart-home messaging (MQTT) is open without encryption", "Make sure your MQTT broker requires a username and password.", "T1071"),
-    5555: ("medium", "Android debugging (ADB) is open", "Anyone on your network can control this device. Turn off 'ADB debugging' or 'Network debugging' in its developer settings.", "T1021"),
-    554: ("low", "Camera video stream (RTSP) is open", "Normal for cameras. Make sure the camera doesn't use its default password.", "T1125"),
-    445: ("low", "File sharing (SMB) is open", "Normal for PCs and NAS drives. Make sure guest access is off and it isn't forwarded from your router.", "T1021.002"),
-    139: ("low", "Old-style file sharing (NetBIOS) is open", "Normal for Windows PCs. Turn off SMBv1 if the device offers it.", "T1021.002"),
-    80: ("info", "Web admin page (not encrypted)", "If this is a router, camera or printer, change the default admin password.", ""),
+    23: (
+        "high",
+        "Telnet is open",
+        "Telnet sends passwords in plain text and is the favourite way in for botnets like Mirai. Turn it off in the device's settings or update its firmware. If you can't, consider replacing the device.",
+        "T1021",
+    ),
+    2323: (
+        "high",
+        "Telnet (alternate port) is open",
+        "Often a hidden service on cheap cameras and smart plugs. Update the firmware, and if it stays open, keep the device off your main network.",
+        "T1021",
+    ),
+    7547: (
+        "high",
+        "Remote management (TR-069) is open",
+        "This is a router/modem management port that attackers scan for. Check for a firmware update or ask your internet provider.",
+        "T1133",
+    ),
+    21: (
+        "medium",
+        "FTP file transfer is open",
+        "FTP sends passwords in plain text. Turn it off if you don't use it, or switch to SFTP.",
+        "T1021",
+    ),
+    5900: (
+        "medium",
+        "Screen sharing (VNC) is open",
+        "Make sure it has a strong password, or turn it off when you're not using it.",
+        "T1021.005",
+    ),
+    3389: (
+        "medium",
+        "Remote Desktop is open",
+        "Fine for your own PC on your home network. Use a strong password and keep Windows updated.",
+        "T1021.001",
+    ),
+    1883: (
+        "medium",
+        "Smart-home messaging (MQTT) is open without encryption",
+        "Make sure your MQTT broker requires a username and password.",
+        "T1071",
+    ),
+    5555: (
+        "medium",
+        "Android debugging (ADB) is open",
+        "Anyone on your network can control this device. Turn off 'ADB debugging' or 'Network debugging' in its developer settings.",
+        "T1021",
+    ),
+    554: (
+        "low",
+        "Camera video stream (RTSP) is open",
+        "Normal for cameras. Make sure the camera doesn't use its default password.",
+        "T1125",
+    ),
+    445: (
+        "low",
+        "File sharing (SMB) is open",
+        "Normal for PCs and NAS drives. Make sure guest access is off and it isn't forwarded from your router.",
+        "T1021.002",
+    ),
+    139: (
+        "low",
+        "Old-style file sharing (NetBIOS) is open",
+        "Normal for Windows PCs. Turn off SMBv1 if the device offers it.",
+        "T1021.002",
+    ),
+    80: (
+        "info",
+        "Web admin page (not encrypted)",
+        "If this is a router, camera or printer, change the default admin password.",
+        "",
+    ),
     443: ("info", "Web page (encrypted)", "", ""),
     8080: ("info", "Web admin page", "If this is a device's admin page, change the default password.", ""),
     8443: ("info", "Web admin page (encrypted)", "", ""),
@@ -1917,7 +2436,11 @@ def load_oui():
     if _oui["loaded"]:
         return
     _oui["loaded"] = True
-    for path in ("/usr/share/arp-scan/ieee-oui.txt", "/usr/share/ieee-data/oui.txt", "/usr/share/nmap/nmap-mac-prefixes"):
+    for path in (
+        "/usr/share/arp-scan/ieee-oui.txt",
+        "/usr/share/ieee-data/oui.txt",
+        "/usr/share/nmap/nmap-mac-prefixes",
+    ):
         try:
             f = open(path, errors="replace")
         except OSError:
@@ -1956,10 +2479,11 @@ def iface_cidr(iface):
     try:  # no iproute2: ask the kernel directly
         import fcntl
         import struct
+
         sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         req = struct.pack("256s", iface[:15].encode())
-        addr = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x8915, req)[20:24])   # SIOCGIFADDR
-        mask = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x891b, req)[20:24])   # SIOCGIFNETMASK
+        addr = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x8915, req)[20:24])  # SIOCGIFADDR
+        mask = socket.inet_ntoa(fcntl.ioctl(sk.fileno(), 0x891B, req)[20:24])  # SIOCGIFNETMASK
         sk.close()
         return "%s/%s" % (addr, mask)
     except Exception:
@@ -2027,6 +2551,7 @@ def reverse_names(ips):
             return ip, socket.gethostbyaddr(ip)[0]
         except Exception:
             return ip, ""
+
     out = {}
     with ThreadPoolExecutor(16) as ex:
         futs = [ex.submit(one, ip) for ip in ips]
@@ -2063,7 +2588,7 @@ def private_mac(mac):
         return False
 
 
-SAME_SLACK = 10 * 60000   # sweeps are 5 minutes apart, so allow a little overlap
+SAME_SLACK = 10 * 60000  # sweeps are 5 minutes apart, so allow a little overlap
 
 
 def same_device_hint(d):
@@ -2088,7 +2613,7 @@ def same_device_hint(d):
         if (o.get("zone") or zone_of(o.get("ip", ""))) != zone:
             continue
         if o.get("last", 0) > d.get("first", 0) + SAME_SLACK:
-            continue   # both were around at once, so they're two devices
+            continue  # both were around at once, so they're two devices
         if best is None or o.get("last", 0) > best.get("last", 0):
             best = o
     return {"mac": best["mac"], "label": dev_label(best)} if best else None
@@ -2107,9 +2632,22 @@ def dev_seen(ip, mac, vend, host, t, first, gw=None, itf=None, via="lan", iface=
     d = S.devices.get(mac)
     is_new = d is None
     if is_new:
-        d = {"mac": mac, "ip": ip, "name": "", "host": "", "vendor": "", "first": t, "last": t,
-             "known": False, "watch": False, "ports": [], "findings": [], "lastScan": 0,
-             "online": True, "missed": 0}
+        d = {
+            "mac": mac,
+            "ip": ip,
+            "name": "",
+            "host": "",
+            "vendor": "",
+            "first": t,
+            "last": t,
+            "known": False,
+            "watch": False,
+            "ports": [],
+            "findings": [],
+            "lastScan": 0,
+            "online": True,
+            "missed": 0,
+        }
         S.devices[mac] = d
     if d["ip"] != ip and not is_new:
         was = d.get("zone") or zone_of(d["ip"])
@@ -2138,10 +2676,17 @@ def dev_seen(ip, mac, vend, host, t, first, gw=None, itf=None, via="lan", iface=
                 other.pop("gateway", None)
         if S.gateway_mac and S.gateway_mac != mac:
             gw_changed = True
-            upsert_alert("gwmac:%s:%d" % (mac, hour(t)), "critical", "Your router's hardware address changed",
-                         "T1557.002", "Credential Access",
-                         "The router at %s now answers from %s instead of %s. If you didn't replace the router, another device may be intercepting your traffic (ARP spoofing)"
-                         % (gw, mac, S.gateway_mac), t, src=ip)
+            upsert_alert(
+                "gwmac:%s:%d" % (mac, hour(t)),
+                "critical",
+                "Your router's hardware address changed",
+                "T1557.002",
+                "Credential Access",
+                "The router at %s now answers from %s instead of %s. If you didn't replace the router, another device may be intercepting your traffic (ARP spoofing)"
+                % (gw, mac, S.gateway_mac),
+                t,
+                src=ip,
+            )
         S.gateway_mac = mac
     if not d.get("online") and not is_new and d.get("watch"):
         add_event(t, "ALLOW", "%s is back online (%s)" % (dev_label(d), ip), "system")
@@ -2151,16 +2696,30 @@ def dev_seen(ip, mac, vend, host, t, first, gw=None, itf=None, via="lan", iface=
             d["baseline"] = True  # was already here when Sentinel started watching
         elif not gw_changed:  # a new router address already raised a critical alert
             zone = (" in %s" % d["zone"]) if d.get("zone") else ""
-            add_event(t, "ALERT", "New device on your network%s: %s (%s, %s)" % (zone, dev_label(d), ip, mac), "system", hot=True)
-            a = upsert_alert("newdev:%s" % mac, "medium", "New device joined your network", "T1200", "Initial Access",
-                             "%s appeared at %s%s (hardware address %s, maker: %s)" % (dev_label(d), ip, zone, mac, d["vendor"] or "unknown"),
-                             t, src=ip)
+            add_event(
+                t,
+                "ALERT",
+                "New device on your network%s: %s (%s, %s)" % (zone, dev_label(d), ip, mac),
+                "system",
+                hot=True,
+            )
+            a = upsert_alert(
+                "newdev:%s" % mac,
+                "medium",
+                "New device joined your network",
+                "T1200",
+                "Initial Access",
+                "%s appeared at %s%s (hardware address %s, maker: %s)"
+                % (dev_label(d), ip, zone, mac, d["vendor"] or "unknown"),
+                t,
+                src=ip,
+            )
             if S.settings["devices"].get("notifyNew", True):
                 maybe_notify(a, t, always=True)
     return d
 
 
-ROUTER_ONLY_STALE = 3 * 3600000   # devices known only from DHCP events count as offline after 3 h of silence
+ROUTER_ONLY_STALE = 3 * 3600000  # devices known only from DHCP events count as offline after 3 h of silence
 
 
 def devices_loop():
@@ -2205,7 +2764,9 @@ def devices_loop():
                         seen.add(mac)
                         if ip == gw or ip in S.my_ips:
                             continue
-                        dev_seen(ip, mac, "", host, t, first or pf_first, via="lan" if local_ip(ip) else "router", iface=rif)
+                        dev_seen(
+                            ip, mac, "", host, t, first or pf_first, via="lan" if local_ip(ip) else "router", iface=rif
+                        )
                     if pf_round:
                         S.pf["nbrSeen"] = True
                     for mac, d in S.devices.items():
@@ -2221,9 +2782,22 @@ def devices_loop():
                         if d.get("online") and d["missed"] >= 2:
                             d["online"] = False
                             if d.get("watch"):
-                                add_event(t, "ALERT", "%s went offline (last seen at %s)" % (dev_label(d), d["ip"]), "system", hot=True)
-                                a = upsert_alert("off:%s:%d" % (mac, hour(t)), "medium", "Watched device went offline: " + dev_label(d),
-                                                 "—", "Impact", "%s (%s) hasn't answered for about 10 minutes" % (dev_label(d), d["ip"]), t)
+                                add_event(
+                                    t,
+                                    "ALERT",
+                                    "%s went offline (last seen at %s)" % (dev_label(d), d["ip"]),
+                                    "system",
+                                    hot=True,
+                                )
+                                a = upsert_alert(
+                                    "off:%s:%d" % (mac, hour(t)),
+                                    "medium",
+                                    "Watched device went offline: " + dev_label(d),
+                                    "—",
+                                    "Impact",
+                                    "%s (%s) hasn't answered for about 10 minutes" % (dev_label(d), d["ip"]),
+                                    t,
+                                )
                                 maybe_notify(a, t, always=True)
                     S.dirty = True
                 first = False
@@ -2244,6 +2818,7 @@ def scan_host(ip):
             return None
         finally:
             s.close()
+
     with ThreadPoolExecutor(12) as ex:
         return sorted(p for p in ex.map(probe, SCAN_PORTS) if p)
 
@@ -2255,8 +2830,14 @@ def portscan_loop():
         try:
             t = now_ms()
             with LOCK:
-                todo = [(d["mac"], d["ip"]) for d in S.devices.values()
-                        if d.get("online") and not d.get("self") and local_ip(d["ip"]) and (d.get("scanNow") or t - d.get("lastScan", 0) > 6 * 3600000)]
+                todo = [
+                    (d["mac"], d["ip"])
+                    for d in S.devices.values()
+                    if d.get("online")
+                    and not d.get("self")
+                    and local_ip(d["ip"])
+                    and (d.get("scanNow") or t - d.get("lastScan", 0) > 6 * 3600000)
+                ]
             for mac, ip in todo[:25]:
                 ports = scan_host(ip)
                 t = now_ms()
@@ -2267,15 +2848,32 @@ def portscan_loop():
                     before = set(d.get("ports", []))
                     d["ports"], d["lastScan"] = ports, t
                     d.pop("scanNow", None)
-                    d["findings"] = sorted(({"port": pt, "level": RISK_PORTS[pt][0], "title": RISK_PORTS[pt][1],
-                                            "advice": RISK_PORTS[pt][2]} for pt in ports),
-                                           key=lambda f: (LEVEL_RANK[f["level"]], f["port"]))
+                    d["findings"] = sorted(
+                        (
+                            {
+                                "port": pt,
+                                "level": RISK_PORTS[pt][0],
+                                "title": RISK_PORTS[pt][1],
+                                "advice": RISK_PORTS[pt][2],
+                            }
+                            for pt in ports
+                        ),
+                        key=lambda f: (LEVEL_RANK[f["level"]], f["port"]),
+                    )
                     for pt in ports:
                         lvl, title, advice, tech = RISK_PORTS[pt]
                         if lvl in ("high", "medium") and (pt not in before or not d.get("alerted", {}).get(str(pt))):
                             d.setdefault("alerted", {})[str(pt)] = t
-                            upsert_alert("devport:%s:%d" % (mac, pt), lvl, "%s on %s" % (title, dev_label(d)), tech,
-                                         "Initial Access", "%s (%s) has port %d open. %s" % (dev_label(d), ip, pt, advice), t, src=ip)
+                            upsert_alert(
+                                "devport:%s:%d" % (mac, pt),
+                                lvl,
+                                "%s on %s" % (title, dev_label(d)),
+                                tech,
+                                "Initial Access",
+                                "%s (%s) has port %d open. %s" % (dev_label(d), ip, pt, advice),
+                                t,
+                                src=ip,
+                            )
                     for pt in before - set(ports):
                         d.get("alerted", {}).pop(str(pt), None)
                     S.dirty = True
@@ -2302,22 +2900,41 @@ def tailscale_loop():
                             if not p:
                                 continue
                             pid = p.get("PublicKey") or p.get("ID") or p.get("HostName")
-                            info = {"id": pid, "name": p.get("HostName") or "?", "dns": (p.get("DNSName") or "").rstrip("."),
-                                    "os": p.get("OS", ""), "ips": p.get("TailscaleIPs") or [],
-                                    "online": bool(p.get("Online")) or p is me, "self": p is me,
-                                    "lastSeen": p.get("LastSeen", "")}
+                            info = {
+                                "id": pid,
+                                "name": p.get("HostName") or "?",
+                                "dns": (p.get("DNSName") or "").rstrip("."),
+                                "os": p.get("OS", ""),
+                                "ips": p.get("TailscaleIPs") or [],
+                                "online": bool(p.get("Online")) or p is me,
+                                "self": p is me,
+                                "lastSeen": p.get("LastSeen", ""),
+                            }
                             e = S.tailnet.get(pid)
                             if e:
                                 if e.get("online") != info["online"]:
-                                    add_event(t, "INFO", "Tailscale: %s is %s" % (info["name"], "online" if info["online"] else "offline"), "system")
+                                    add_event(
+                                        t,
+                                        "INFO",
+                                        "Tailscale: %s is %s"
+                                        % (info["name"], "online" if info["online"] else "offline"),
+                                        "system",
+                                    )
                                 e.update(info)
                             else:
                                 info["first"] = t
                                 S.tailnet[pid] = info
                                 if not first:
-                                    a = upsert_alert("ts:%s" % pid, "high", "New device joined your Tailscale network", "T1078",
-                                                     "Initial Access", "%s (%s) was added to your tailnet. If you didn't add it, remove it in the Tailscale admin console right away"
-                                                     % (info["name"], info["os"] or "unknown system"), t)
+                                    a = upsert_alert(
+                                        "ts:%s" % pid,
+                                        "high",
+                                        "New device joined your Tailscale network",
+                                        "T1078",
+                                        "Initial Access",
+                                        "%s (%s) was added to your tailnet. If you didn't add it, remove it in the Tailscale admin console right away"
+                                        % (info["name"], info["os"] or "unknown system"),
+                                        t,
+                                    )
                         S.dirty = True
                     first = False
         except Exception as ex:
@@ -2332,10 +2949,32 @@ def tailscale_loop():
 # only in /etc/sentinel/wazuh.json (root-only) and never reach the browser. Both connections use
 # certificate pinning: the SHA-256 of each certificate is recorded at setup and checked on every request.
 WAZUH_FILE = os.environ.get("SENTINEL_WAZUH_FILE", "/etc/sentinel/wazuh.json")
-WZ_DEFAULTS = {"indexer": "https://127.0.0.1:9200", "api": "https://127.0.0.1:55000", "dashboard": "",
-               "user": "", "password": "", "apiUser": "", "apiPassword": "", "pins": {}, "minLevel": 7}
-WZ = {"ok": None, "msg": "", "last": 0, "agents": [], "stats": {}, "vulns": {}, "cursor": "now-15m",
-      "seen": collections.deque(maxlen=4000), "token": "", "tokenAt": 0, "status": {}, "apiOk": None, "apiMsg": ""}
+WZ_DEFAULTS = {
+    "indexer": "https://127.0.0.1:9200",
+    "api": "https://127.0.0.1:55000",
+    "dashboard": "",
+    "user": "",
+    "password": "",
+    "apiUser": "",
+    "apiPassword": "",
+    "pins": {},
+    "minLevel": 7,
+}
+WZ = {
+    "ok": None,
+    "msg": "",
+    "last": 0,
+    "agents": [],
+    "stats": {},
+    "vulns": {},
+    "cursor": "now-15m",
+    "seen": collections.deque(maxlen=4000),
+    "token": "",
+    "tokenAt": 0,
+    "status": {},
+    "apiOk": None,
+    "apiMsg": "",
+}
 
 
 class WzError(Exception):
@@ -2367,7 +3006,7 @@ def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None,
     u = urllib.parse.urlsplit(base)
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE   # self-signed; trust comes from the pinned fingerprint below
+    ctx.verify_mode = ssl.CERT_NONE  # self-signed; trust comes from the pinned fingerprint below
     conn = http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=timeout, context=ctx)
     try:
         conn.connect()
@@ -2376,8 +3015,10 @@ def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None,
         if not want:
             raise WzError("No certificate recorded for %s. Run the Wazuh setup again." % base)
         if not hmac.compare_digest(want, got):
-            raise WzError("The certificate at %s changed since setup. If you reinstalled Wazuh, run the setup again; "
-                          "otherwise something may be intercepting the connection." % base)
+            raise WzError(
+                "The certificate at %s changed since setup. If you reinstalled Wazuh, run the setup again; "
+                "otherwise something may be intercepting the connection." % base
+            )
         headers = {"Accept": "application/json", "User-Agent": "Sentinel/" + VERSION}
         data = None
         if body is not None:
@@ -2391,8 +3032,10 @@ def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None,
         r = conn.getresponse()
         raw = r.read(8_000_000)
         if r.status in (401, 403):
-            raise WzError("Wazuh refused the %s account (HTTP %d). Check the username, password and role." %
-                          ("indexer" if base == conf.get("indexer") else "API", r.status))
+            raise WzError(
+                "Wazuh refused the %s account (HTTP %d). Check the username, password and role."
+                % ("indexer" if base == conf.get("indexer") else "API", r.status)
+            )
         if r.status >= 400:
             raise WzError("Wazuh answered HTTP %d: %s" % (r.status, raw[:160].decode("utf-8", "replace")))
         return json.loads(raw or b"{}")
@@ -2403,14 +3046,14 @@ def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None,
 
 
 def wz_search(conf, index, body):
-    return wz_request(conf["indexer"], "/%s/_search" % index, conf, "POST", body,
-                      auth=(conf["user"], conf["password"]))
+    return wz_request(conf["indexer"], "/%s/_search" % index, conf, "POST", body, auth=(conf["user"], conf["password"]))
 
 
 def wz_api(conf, path):
     if not WZ["token"] or now_ms() - WZ["tokenAt"] > 10 * 60000:
-        r = wz_request(conf["api"], "/security/user/authenticate", conf, "POST",
-                       auth=(conf["apiUser"], conf["apiPassword"]))
+        r = wz_request(
+            conf["api"], "/security/user/authenticate", conf, "POST", auth=(conf["apiUser"], conf["apiPassword"])
+        )
         WZ["token"], WZ["tokenAt"] = (r.get("data") or {}).get("token", ""), now_ms()
     return wz_request(conf["api"], path, conf, token=WZ["token"])
 
@@ -2434,16 +3077,36 @@ def wz_link(conf, rule_id, agent_name):
     if not base:
         return ""
     q = "rule.id:%s and agent.name:%s" % (rule_id, agent_name)
-    return base + "/app/threat-hunting#/overview/?tab=general&tabView=events&_q=(query:(language:kuery,query:'%s'))" % \
-        urllib.parse.quote(q, safe=":")
+    return (
+        base
+        + "/app/threat-hunting#/overview/?tab=general&tabView=events&_q=(query:(language:kuery,query:'%s'))"
+        % urllib.parse.quote(q, safe=":")
+    )
 
 
 def wz_alerts(conf):
-    body = {"size": 300, "sort": [{"timestamp": {"order": "asc"}}],
-            "_source": ["timestamp", "rule", "agent", "data.srcip", "data.srcuser", "data.dstuser",
-                        "data.win.eventdata.targetUserName", "id"],
-            "query": {"bool": {"filter": [{"range": {"rule.level": {"gte": int(conf.get("minLevel") or 7)}}},
-                                          {"range": {"timestamp": {"gte": WZ["cursor"]}}}]}}}
+    body = {
+        "size": 300,
+        "sort": [{"timestamp": {"order": "asc"}}],
+        "_source": [
+            "timestamp",
+            "rule",
+            "agent",
+            "data.srcip",
+            "data.srcuser",
+            "data.dstuser",
+            "data.win.eventdata.targetUserName",
+            "id",
+        ],
+        "query": {
+            "bool": {
+                "filter": [
+                    {"range": {"rule.level": {"gte": int(conf.get("minLevel") or 7)}}},
+                    {"range": {"timestamp": {"gte": WZ["cursor"]}}},
+                ]
+            }
+        },
+    }
     hits = (wz_search(conf, "wazuh-alerts-*", body).get("hits") or {}).get("hits") or []
     new = 0
     for h in hits:
@@ -2461,14 +3124,27 @@ def wz_alerts(conf):
         tech = (mitre.get("id") or ["—"])[0]
         tac = (mitre.get("tactic") or ["—"])[0]
         ip = valid_ip(data.get("srcip")) if data.get("srcip") else None
-        user = data.get("srcuser") or data.get("dstuser") or ((data.get("win") or {}).get("eventdata") or {}).get("targetUserName")
+        user = (
+            data.get("srcuser")
+            or data.get("dstuser")
+            or ((data.get("win") or {}).get("eventdata") or {}).get("targetUserName")
+        )
         desc = (rule.get("description") or "Wazuh alert").strip().replace("\\\\", "\\")
         key = "wz:%s:%s:%d" % (rid, aid, hour(t))
         with LOCK:
             prev = S.alerts.get(key)
-            a = upsert_alert(key, wz_level_sev(lvl), ("Wazuh: " + desc)[:140], tech, tac,
-                             "%s on %s (Wazuh rule %s, level %d)" % (desc.rstrip("."), aname, rid, lvl),
-                             t, src=ip, user=user, count=(prev["count"] + 1) if prev else 1)
+            a = upsert_alert(
+                key,
+                wz_level_sev(lvl),
+                ("Wazuh: " + desc)[:140],
+                tech,
+                tac,
+                "%s on %s (Wazuh rule %s, level %d)" % (desc.rstrip("."), aname, rid, lvl),
+                t,
+                src=ip,
+                user=user,
+                count=(prev["count"] + 1) if prev else 1,
+            )
             if not prev:
                 a["log"][0][1] = "Detected by Wazuh on %s (rule %s)" % (aname, rid)
                 a["host"] = aname
@@ -2485,9 +3161,15 @@ def wz_agents(conf):
     for it in items:
         aid, st = it.get("id"), it.get("status")
         osd = it.get("os") or {}
-        ag = {"id": aid, "name": it.get("name"), "ip": it.get("ip"), "status": st,
-              "os": " ".join(x for x in (osd.get("name"), osd.get("version")) if x), "version": it.get("version"),
-              "lastKeepAlive": it.get("lastKeepAlive")}
+        ag = {
+            "id": aid,
+            "name": it.get("name"),
+            "ip": it.get("ip"),
+            "status": st,
+            "os": " ".join(x for x in (osd.get("name"), osd.get("version")) if x),
+            "version": it.get("version"),
+            "lastKeepAlive": it.get("lastKeepAlive"),
+        }
         out.append(ag)
         if aid == "000":
             continue
@@ -2499,10 +3181,17 @@ def wz_agents(conf):
                 add_event(t, "wazuh", "Agent %s went offline" % ag["name"], "wazuh")
         elif was == "active" and st == "disconnected":
             with LOCK:
-                upsert_alert("wz-agent:%s:%d" % (aid, hour(t)), "medium", "Wazuh agent stopped reporting",
-                             "T1562.001", "Defense Evasion",
-                             "%s (%s) stopped checking in with Wazuh, and you asked to be told when it goes offline. "
-                             "Make sure it's powered on and that nobody stopped or removed the agent" % (ag["name"], ag["ip"]), t, user=None)
+                upsert_alert(
+                    "wz-agent:%s:%d" % (aid, hour(t)),
+                    "medium",
+                    "Wazuh agent stopped reporting",
+                    "T1562.001",
+                    "Defense Evasion",
+                    "%s (%s) stopped checking in with Wazuh, and you asked to be told when it goes offline. "
+                    "Make sure it's powered on and that nobody stopped or removed the agent" % (ag["name"], ag["ip"]),
+                    t,
+                    user=None,
+                )
                 add_event(t, "wazuh", "Agent %s disconnected" % ag["name"], "wazuh", hot=True)
         elif was == "disconnected" and st == "active":
             with LOCK:
@@ -2511,22 +3200,48 @@ def wz_agents(conf):
 
 
 def wz_stats(conf):
-    body = {"size": 0, "query": {"range": {"timestamp": {"gte": "now-24h"}}},
-            "aggs": {"lv": {"range": {"field": "rule.level",
-                                       "ranges": [{"key": "critical", "from": 15}, {"key": "high", "from": 12, "to": 15},
-                                                  {"key": "medium", "from": 7, "to": 12}, {"key": "low", "to": 7}]}},
-                     "top": {"filter": {"range": {"rule.level": {"gte": 7}}},
-                             "aggs": {"r": {"terms": {"field": "rule.description", "size": 5}}}}}}
+    body = {
+        "size": 0,
+        "query": {"range": {"timestamp": {"gte": "now-24h"}}},
+        "aggs": {
+            "lv": {
+                "range": {
+                    "field": "rule.level",
+                    "ranges": [
+                        {"key": "critical", "from": 15},
+                        {"key": "high", "from": 12, "to": 15},
+                        {"key": "medium", "from": 7, "to": 12},
+                        {"key": "low", "to": 7},
+                    ],
+                }
+            },
+            "top": {
+                "filter": {"range": {"rule.level": {"gte": 7}}},
+                "aggs": {"r": {"terms": {"field": "rule.description", "size": 5}}},
+            },
+        },
+    }
     ag = wz_search(conf, "wazuh-alerts-*", body).get("aggregations") or {}
-    WZ["stats"] = {"levels": {b["key"]: b["doc_count"] for b in (ag.get("lv") or {}).get("buckets", [])},
-                   "top": [{"t": b["key"], "n": b["doc_count"]} for b in ((ag.get("top") or {}).get("r") or {}).get("buckets", [])]}
+    WZ["stats"] = {
+        "levels": {b["key"]: b["doc_count"] for b in (ag.get("lv") or {}).get("buckets", [])},
+        "top": [
+            {"t": b["key"], "n": b["doc_count"]} for b in ((ag.get("top") or {}).get("r") or {}).get("buckets", [])
+        ],
+    }
     try:
-        vb = {"size": 0, "aggs": {"sev": {"terms": {"field": "vulnerability.severity", "size": 6}},
-                                  "pkg": {"terms": {"field": "package.name", "size": 5}},
-                                  "agent": {"terms": {"field": "agent.name", "size": 10}}}}
+        vb = {
+            "size": 0,
+            "aggs": {
+                "sev": {"terms": {"field": "vulnerability.severity", "size": 6}},
+                "pkg": {"terms": {"field": "package.name", "size": 5}},
+                "agent": {"terms": {"field": "agent.name", "size": 10}},
+            },
+        }
         va = wz_search(conf, "wazuh-states-vulnerabilities-*", vb).get("aggregations") or {}
-        WZ["vulns"] = {k: [{"k": b["key"], "n": b["doc_count"]} for b in (va.get(k) or {}).get("buckets", [])]
-                       for k in ("sev", "pkg", "agent")}
+        WZ["vulns"] = {
+            k: [{"k": b["key"], "n": b["doc_count"]} for b in (va.get(k) or {}).get("buckets", [])]
+            for k in ("sev", "pkg", "agent")
+        }
     except WzError:
         WZ["vulns"] = {}
 
@@ -2582,10 +3297,19 @@ def wz_snapshot():
         conf = wz_conf()
     except WzError:
         conf = {}
-    return {"configured": bool(conf), "ok": WZ["ok"], "msg": WZ["msg"], "last": WZ["last"],
-            "apiOk": WZ["apiOk"], "apiMsg": WZ["apiMsg"], "agents": WZ["agents"], "stats": WZ["stats"],
-            "vulns": WZ["vulns"], "dashboard": (conf or {}).get("dashboard", ""),
-            "minLevel": (conf or {}).get("minLevel", 7)}
+    return {
+        "configured": bool(conf),
+        "ok": WZ["ok"],
+        "msg": WZ["msg"],
+        "last": WZ["last"],
+        "apiOk": WZ["apiOk"],
+        "apiMsg": WZ["apiMsg"],
+        "agents": WZ["agents"],
+        "stats": WZ["stats"],
+        "vulns": WZ["vulns"],
+        "dashboard": (conf or {}).get("dashboard", ""),
+        "minLevel": (conf or {}).get("minLevel", 7),
+    }
 
 
 def wazuh_setup():
@@ -2608,17 +3332,28 @@ def wazuh_setup():
             c[key] = v
 
     # prefer the address on the default-route interface; skip Docker bridges (172.16/12) and Tailscale (100.64/10)
-    lan = [iface_cidr(default_iface() or "").split("/")[0]] if default_iface() and iface_cidr(default_iface() or "") else []
-    lan = [i for i in lan if i] or sorted(i for i in my_addresses() if not is_loopback(i) and ":" not in i
-                                          and not ipaddress.ip_address(i) in ipaddress.ip_network("172.16.0.0/12")
-                                          and not ipaddress.ip_address(i) in ipaddress.ip_network("100.64.0.0/10"))
+    lan = (
+        [iface_cidr(default_iface() or "").split("/")[0]]
+        if default_iface() and iface_cidr(default_iface() or "")
+        else []
+    )
+    lan = [i for i in lan if i] or sorted(
+        i
+        for i in my_addresses()
+        if not is_loopback(i)
+        and ":" not in i
+        and not ipaddress.ip_address(i) in ipaddress.ip_network("172.16.0.0/12")
+        and not ipaddress.ip_address(i) in ipaddress.ip_network("100.64.0.0/10")
+    )
     if not c.get("dashboard") and lan:
         c["dashboard"] = "https://%s:8443" % lan[0]
     if not c.get("user"):
         c["user"] = "sentinel"
     if not c.get("apiUser"):
         c["apiUser"] = "sentinel-api"
-    print("Sentinel ↔ Wazuh setup. Passwords are hidden while you type and stored only in %s (root-only).\n" % WAZUH_FILE)
+    print(
+        "Sentinel ↔ Wazuh setup. Passwords are hidden while you type and stored only in %s (root-only).\n" % WAZUH_FILE
+    )
     ask("Wazuh dashboard address (for 'Open in Wazuh' links)", "dashboard")
     ask("Indexer URL", "indexer")
     ask("Read-only indexer user", "user")
@@ -2633,19 +3368,28 @@ def wazuh_setup():
         except Exception as ex:
             sys.exit("Can't reach %s: %s" % (base, ex))
         pins[base] = fp
-        print("  Certificate for %s: SHA-256 %s" % (base, ":".join(fp[i:i + 2] for i in range(0, 16, 2)) + "…"))
+        print("  Certificate for %s: SHA-256 %s" % (base, ":".join(fp[i : i + 2] for i in range(0, 16, 2)) + "…"))
     c["pins"] = pins
     try:
-        r = wz_search(c, "wazuh-alerts-*", {"size": 0, "track_total_hits": True,
-                                            "query": {"range": {"timestamp": {"gte": "now-24h"}}}})
-        print("  Indexer: OK, %s alerts in the last 24 hours." % ((r.get("hits") or {}).get("total") or {}).get("value", "?"))
+        r = wz_search(
+            c,
+            "wazuh-alerts-*",
+            {"size": 0, "track_total_hits": True, "query": {"range": {"timestamp": {"gte": "now-24h"}}}},
+        )
+        print(
+            "  Indexer: OK, %s alerts in the last 24 hours."
+            % ((r.get("hits") or {}).get("total") or {}).get("value", "?")
+        )
     except WzError as ex:
         sys.exit("  Indexer: %s" % ex)
     try:
         WZ["token"] = ""
         r = wz_api(c, "/agents?limit=500&select=id,name,status")
         items = (r.get("data") or {}).get("affected_items") or []
-        print("  API: OK, %d agents (%s)." % (len(items), ", ".join("%s %s" % (i.get("name"), i.get("status")) for i in items)))
+        print(
+            "  API: OK, %d agents (%s)."
+            % (len(items), ", ".join("%s %s" % (i.get("name"), i.get("status")) for i in items))
+        )
     except WzError as ex:
         sys.exit("  API: %s" % ex)
     os.makedirs(os.path.dirname(WAZUH_FILE), exist_ok=True)
@@ -2672,20 +3416,41 @@ def snapshot():
     t = now_ms()
     counts = collections.Counter(k for (tt, k) in S.counts if tt > t - 3600000)
     alerts = sorted(S.alerts.values(), key=lambda a: a["last"], reverse=True)[:200]
+
     # Home-network devices only count as hostile if they actually failed logins
     def noise(s):
         # one or two packets stopped at the router and nothing else: background noise, not a hostile source
-        return (s["fails"] == 0 and s.get("edge", 0) >= s["blocks"] and s["blocks"] < 3
-                and s["ip"] not in S.blocked and s["ip"] not in S.pf["edgeBlocked"])
-    srcs = sorted((s for s in S.sources.values() if not (s["lan"] and s["fails"] == 0) and not noise(s)),
-                  key=lambda s: s["last"], reverse=True)[:40]
-    sources = [{"ip": s["ip"], "first": s["first"], "last": s["last"], "fails": s["fails"], "blocks": s["blocks"],
-                "users": sorted(s["users"])[:8], "nusers": len(s["users"]), "ports": sorted(s["ports"])[:12],
-                "lan": s["lan"], "why": s["why"] or "Suspicious activity",
-                "blocked": s["ip"] in S.blocked or s["ip"] in S.pf["edgeBlocked"],
-                "blockedAt": "router" if s["ip"] in S.pf["edgeBlocked"] else ("server" if s["ip"] in S.blocked else ""),
-                "edgeOnly": s["fails"] == 0 and s.get("edge", 0) >= s["blocks"] and s["blocks"] > 0}
-               for s in srcs]
+        return (
+            s["fails"] == 0
+            and s.get("edge", 0) >= s["blocks"]
+            and s["blocks"] < 3
+            and s["ip"] not in S.blocked
+            and s["ip"] not in S.pf["edgeBlocked"]
+        )
+
+    srcs = sorted(
+        (s for s in S.sources.values() if not (s["lan"] and s["fails"] == 0) and not noise(s)),
+        key=lambda s: s["last"],
+        reverse=True,
+    )[:40]
+    sources = [
+        {
+            "ip": s["ip"],
+            "first": s["first"],
+            "last": s["last"],
+            "fails": s["fails"],
+            "blocks": s["blocks"],
+            "users": sorted(s["users"])[:8],
+            "nusers": len(s["users"]),
+            "ports": sorted(s["ports"])[:12],
+            "lan": s["lan"],
+            "why": s["why"] or "Suspicious activity",
+            "blocked": s["ip"] in S.blocked or s["ip"] in S.pf["edgeBlocked"],
+            "blockedAt": "router" if s["ip"] in S.pf["edgeBlocked"] else ("server" if s["ip"] in S.blocked else ""),
+            "edgeOnly": s["fails"] == 0 and s.get("edge", 0) >= s["blocks"] and s["blocks"] > 0,
+        }
+        for s in srcs
+    ]
     os_name = platform.platform()
     try:
         with open("/etc/os-release") as f:
@@ -2695,43 +3460,86 @@ def snapshot():
     except Exception:
         pass
     net = {k: v for k, v in S.net.items() if not k.startswith("_")}
-    wz_by_ip = {a["ip"]: {"id": a["id"], "name": a["name"], "status": a["status"]}
-                for a in WZ["agents"] if a.get("ip") and a.get("id") != "000"}
+    wz_by_ip = {
+        a["ip"]: {"id": a["id"], "name": a["name"], "status": a["status"]}
+        for a in WZ["agents"]
+        if a.get("ip") and a.get("id") != "000"
+    }
     net["newPerMin"] = len(S.new_conns)
     return {
-        "mode": "live", "version": VERSION, "now": t,
-        "host": {"name": HOST, "os": os_name, "kernel": platform.release(),
-                 "ips": sorted(i for i in S.my_ips if not is_loopback(i))},
+        "mode": "live",
+        "version": VERSION,
+        "now": t,
+        "host": {
+            "name": HOST,
+            "os": os_name,
+            "kernel": platform.release(),
+            "ips": sorted(i for i in S.my_ips if not is_loopback(i)),
+        },
         "metrics": S.metrics,
         "traffic": {"iface": S.iface, "interval": 2, "rx": list(S.rx), "tx": list(S.tx)},
-        "kpi": {"events1h": sum(counts.values()), "fails1h": counts.get("fail", 0),
-                "drops1h": counts.get("drop", 0), "logins1h": counts.get("login", 0)},
+        "kpi": {
+            "events1h": sum(counts.values()),
+            "fails1h": counts.get("fail", 0),
+            "drops1h": counts.get("drop", 0),
+            "logins1h": counts.get("login", 0),
+        },
         "alerts": alerts,
         "events": list(S.events)[-150:][::-1],
         "sources": sources,
-        "services": S.services, "checks": S.checks, "net": net,
-        "settings": {"autoblock": S.settings["autoblock"],
-                     "devices": S.settings["devices"],
-                     "notify": dict({k: v for k, v in S.settings["notify"].items() if k not in ("lastSummary", "webhook")},
-                                    webhookSet=bool(S.settings["notify"].get("webhook")))},
+        "services": S.services,
+        "checks": S.checks,
+        "net": net,
+        "settings": {
+            "autoblock": S.settings["autoblock"],
+            "devices": S.settings["devices"],
+            "notify": dict(
+                {k: v for k, v in S.settings["notify"].items() if k not in ("lastSummary", "webhook")},
+                webhookSet=bool(S.settings["notify"].get("webhook")),
+            ),
+        },
         "notifyStatus": S.notify_status,
-        "firewall": {"ufw": S.ufw_state, "blocked": sorted(S.blocked | S.pf["edgeBlocked"]),
-                     "routerBlocked": sorted(S.pf["edgeBlocked"])},
-        "pfsense": dict(S.settings["pfsense"], hostEffective=pf_host(), sshOk=S.pf.get("sshOk"), sshMsg=S.pf.get("sshMsg", ""),
-                        lastLog=S.pf.get("lastLog", 0), logs1h=counts.get("pflog", 0), keyReady=os.path.exists(PF_KEY + ".pub"),
-                        pubkey=pf_pubkey(create=False), nbrOk=S.pf.get("nbrOk"), nbrMsg=S.pf.get("nbrMsg", ""),
-                        nbrLast=S.pf.get("nbrLast", 0), nbrCount=S.pf.get("nbrCount", 0), dhcpLast=S.pf.get("dhcpLast", 0)),
+        "firewall": {
+            "ufw": S.ufw_state,
+            "blocked": sorted(S.blocked | S.pf["edgeBlocked"]),
+            "routerBlocked": sorted(S.pf["edgeBlocked"]),
+        },
+        "pfsense": dict(
+            S.settings["pfsense"],
+            hostEffective=pf_host(),
+            sshOk=S.pf.get("sshOk"),
+            sshMsg=S.pf.get("sshMsg", ""),
+            lastLog=S.pf.get("lastLog", 0),
+            logs1h=counts.get("pflog", 0),
+            keyReady=os.path.exists(PF_KEY + ".pub"),
+            pubkey=pf_pubkey(create=False),
+            nbrOk=S.pf.get("nbrOk"),
+            nbrMsg=S.pf.get("nbrMsg", ""),
+            nbrLast=S.pf.get("nbrLast", 0),
+            nbrCount=S.pf.get("nbrCount", 0),
+            dhcpLast=S.pf.get("dhcpLast", 0),
+        ),
         "learning": S.learning,
         "lan": S.lan,
-        "devices": sorted((dict({k: v for k, v in d.items() if k not in ("missed", "alerted")},
-                                zone=d.get("zone") or zone_of(d.get("ip", "")), reach=local_ip(d.get("ip", "")),
-                                wz=wz_by_ip.get(d.get("ip", "")), same=same_device_hint(d))
-                           for d in S.devices.values()),
-                          key=lambda d: (not d.get("online"), d.get("ip", ""))),
+        "devices": sorted(
+            (
+                dict(
+                    {k: v for k, v in d.items() if k not in ("missed", "alerted")},
+                    zone=d.get("zone") or zone_of(d.get("ip", "")),
+                    reach=local_ip(d.get("ip", "")),
+                    wz=wz_by_ip.get(d.get("ip", "")),
+                    same=same_device_hint(d),
+                )
+                for d in S.devices.values()
+            ),
+            key=lambda d: (not d.get("online"), d.get("ip", "")),
+        ),
         "zones": zone_summary(),
         "wazuh": wz_snapshot(),
         "integrations": ingest_snapshot(t),
-        "tailnet": sorted(S.tailnet.values(), key=lambda x: (not x.get("self"), not x.get("online"), x.get("name", ""))),
+        "tailnet": sorted(
+            S.tailnet.values(), key=lambda x: (not x.get("self"), not x.get("online"), x.get("name", ""))
+        ),
         "geo": {ip: S.geo[ip] for ip in {s["ip"] for s in sources} | {a["src"] for a in alerts} if ip in S.geo},
     }
 
@@ -2759,9 +3567,16 @@ def load_token(path=None, nbytes=12):
 
 TOKEN = None
 INGEST_TOKEN = None
-MIME = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".png": "image/png",
-        ".ico": "image/x-icon", ".webmanifest": "application/manifest+json", ".json": "application/json",
-        ".svg": "image/svg+xml", ".css": "text/css"}
+MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+    ".webmanifest": "application/manifest+json",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".css": "text/css",
+}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -2807,7 +3622,7 @@ class Handler(BaseHTTPRequestHandler):
         key = self.headers.get("X-Sentinel-Key", "")
         auth = self.headers.get("Authorization", "")
         if not key and auth[:7].lower() == "bearer ":
-            key = auth[7:].strip()   # Alertmanager and scripts send the key this way
+            key = auth[7:].strip()  # Alertmanager and scripts send the key this way
         route = self.path.split("?")[0]
         ok = hmac.compare_digest(key.encode(), TOKEN.encode())
         if not ok and INGEST_TOKEN and route.startswith("/api/ingest/"):
@@ -2839,9 +3654,17 @@ class Handler(BaseHTTPRequestHandler):
             if not n.get("webhook"):
                 return self._send(400, {"error": "Paste your Discord webhook link first."})
             try:
-                discord_send(n, {"title": "\u2705 Sentinel is connected", "color": 0x45C6E6,
-                                 "description": "High and critical alerts and your daily summary from **%s** will post here." % HOST,
-                                 "footer": {"text": HOST}, "timestamp": iso(now_ms())})
+                discord_send(
+                    n,
+                    {
+                        "title": "\u2705 Sentinel is connected",
+                        "color": 0x45C6E6,
+                        "description": "High and critical alerts and your daily summary from **%s** will post here."
+                        % HOST,
+                        "footer": {"text": HOST},
+                        "timestamp": iso(now_ms()),
+                    },
+                )
             except Exception as ex:
                 msg = describe_error(ex)
                 with LOCK:
@@ -2858,16 +3681,25 @@ class Handler(BaseHTTPRequestHandler):
                 if is_loopback(ip) or ip in S.my_ips:
                     return self._send(400, {"error": "Sentinel won't block this server's own address."})
                 if ip == requester:
-                    return self._send(400, {"error": "That's the address you're connecting from, so blocking it would lock you out."})
+                    return self._send(
+                        400, {"error": "That's the address you're connecting from, so blocking it would lock you out."}
+                    )
                 if pf_host() and ip == pf_host():
-                    return self._send(400, {"error": "That's your router. Blocking it would cut this server off the network."})
+                    return self._send(
+                        400, {"error": "That's your router. Blocking it would cut this server off the network."}
+                    )
                 ok, msg = block_ip(ip)
             else:
                 ok, msg = unblock_ip(ip)
             if ok:
                 t = now_ms()
                 with LOCK:
-                    add_event(t, "DROP" if path == "/api/block" else "INFO", msg.split(" The rule")[0] + " (from dashboard)", "system")
+                    add_event(
+                        t,
+                        "DROP" if path == "/api/block" else "INFO",
+                        msg.split(" The rule")[0] + " (from dashboard)",
+                        "system",
+                    )
                     for a in S.alerts.values():
                         if a.get("src") == ip and a["status"] != "closed":
                             a["log"].append([t, msg.split(" The rule")[0]])
@@ -2878,7 +3710,12 @@ class Handler(BaseHTTPRequestHandler):
             pf = S.settings["pfsense"]
             if act == "key":
                 key = pf_pubkey(create=True)
-                return self._send(200 if key else 500, {"ok": bool(key), "message": "Key ready. Copy it into pfSense."} if key else {"error": "Couldn't create an SSH key (is ssh-keygen installed?)"})
+                return self._send(
+                    200 if key else 500,
+                    {"ok": bool(key), "message": "Key ready. Copy it into pfSense."}
+                    if key
+                    else {"error": "Couldn't create an SSH key (is ssh-keygen installed?)"},
+                )
             if act == "save":
                 host = str(body.get("host", pf.get("host", ""))).strip()
                 user = str(body.get("user", pf.get("user", "admin"))).strip()
@@ -2908,7 +3745,9 @@ class Handler(BaseHTTPRequestHandler):
                     S.pf["sshOk"] = None
                     S.pf["sshMsg"] = ""
                     S.dirty = True
-                return self._send(200, {"ok": True, "message": "Router blocking turned off. Existing router blocks stay in pfSense."})
+                return self._send(
+                    200, {"ok": True, "message": "Router blocking turned off. Existing router blocks stay in pfSense."}
+                )
             return self._send(400, {"error": "Unknown action"})
         if path == "/api/settings" and isinstance(body.get("notify"), dict) and "webhook" in body["notify"]:
             url = str(body["notify"].get("webhook") or "").strip()
@@ -2918,7 +3757,12 @@ class Handler(BaseHTTPRequestHandler):
                     S.dirty = True
                 return self._send(200, {"ok": True, "message": "Discord disconnected"})
             if not RX_WEBHOOK.match(url):
-                return self._send(400, {"error": "That doesn't look like a Discord webhook link. It should start with https://discord.com/api/webhooks/"})
+                return self._send(
+                    400,
+                    {
+                        "error": "That doesn't look like a Discord webhook link. It should start with https://discord.com/api/webhooks/"
+                    },
+                )
             try:
                 info = discord_request(url)
             except Exception as ex:
@@ -2963,24 +3807,60 @@ class Handler(BaseHTTPRequestHandler):
                         S.fails.pop(ip, None)
                         S.fw_ports.pop(ip, None)
                     S.dirty = True
-                    add_event(t, "INFO", "Hostile sources list cleared from the dashboard (%d removed)" % len(gone), "system")
-                    return self._send(200, {"ok": True, "message": ("Cleared %d source%s. Blocked addresses stay listed." % (len(gone), "" if len(gone) == 1 else "s")) if gone else "Nothing to clear."})
+                    add_event(
+                        t, "INFO", "Hostile sources list cleared from the dashboard (%d removed)" % len(gone), "system"
+                    )
+                    return self._send(
+                        200,
+                        {
+                            "ok": True,
+                            "message": (
+                                "Cleared %d source%s. Blocked addresses stay listed."
+                                % (len(gone), "" if len(gone) == 1 else "s")
+                            )
+                            if gone
+                            else "Nothing to clear.",
+                        },
+                    )
                 return self._send(400, {"error": "Unknown action"})
             if path == "/api/devices-cleanup":
-                gone = [m for m, d in S.devices.items()
-                        if not d.get("online") and not d.get("known") and not d.get("self")
-                        and not d.get("watch") and not d.get("gateway")]
+                gone = [
+                    m
+                    for m, d in S.devices.items()
+                    if not d.get("online")
+                    and not d.get("known")
+                    and not d.get("self")
+                    and not d.get("watch")
+                    and not d.get("gateway")
+                ]
                 for m in gone:
                     del S.devices[m]
                 if gone:
                     S.dirty = True
-                    add_event(t, "INFO", "Removed %d offline device%s not marked as yours (from the dashboard)"
-                              % (len(gone), "" if len(gone) == 1 else "s"), "system")
-                return self._send(200, {"ok": True, "message": ("Removed %d offline device%s. If one comes back it will show up as new." %
-                                                                (len(gone), "" if len(gone) == 1 else "s")) if gone else "Nothing to remove."})
+                    add_event(
+                        t,
+                        "INFO",
+                        "Removed %d offline device%s not marked as yours (from the dashboard)"
+                        % (len(gone), "" if len(gone) == 1 else "s"),
+                        "system",
+                    )
+                return self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "message": (
+                            "Removed %d offline device%s. If one comes back it will show up as new."
+                            % (len(gone), "" if len(gone) == 1 else "s")
+                        )
+                        if gone
+                        else "Nothing to remove.",
+                    },
+                )
             if path == "/api/lan-sweep":
                 DEV_EVT.set()
-                return self._send(200, {"ok": True, "message": "Scanning your network. New devices show up in about a minute."})
+                return self._send(
+                    200, {"ok": True, "message": "Scanning your network. New devices show up in about a minute."}
+                )
             if path == "/api/device":
                 mac = str(body.get("mac", "")).lower()
                 d = S.devices.get(mac)
@@ -3001,15 +3881,25 @@ class Handler(BaseHTTPRequestHandler):
                     msg = "%s marked as %s" % (label, "known" if d["known"] else "not known")
                 elif act == "watch":
                     d["watch"] = bool(body.get("value"))
-                    msg = ("Watching %s. You'll get an alert if it goes offline." % label) if d["watch"] else "Stopped watching %s" % label
+                    msg = (
+                        ("Watching %s. You'll get an alert if it goes offline." % label)
+                        if d["watch"]
+                        else "Stopped watching %s" % label
+                    )
                 elif act == "scan":
                     if not local_ip(d["ip"]):
-                        return self._send(400, {"error": "%s is in another zone (%s), and pfSense keeps this server from reaching it. That's the separation doing its job." % (label, d.get("zone") or d["ip"])})
+                        return self._send(
+                            400,
+                            {
+                                "error": "%s is in another zone (%s), and pfSense keeps this server from reaching it. That's the separation doing its job."
+                                % (label, d.get("zone") or d["ip"])
+                            },
+                        )
                     d["scanNow"] = True
                     SCAN_EVT.set()
                     msg = "Checking %s for risky services. Results in about a minute." % label
                 elif act == "merge":
-                    hint = same_device_hint(d)   # re-checked here; the browser's suggestion isn't trusted
+                    hint = same_device_hint(d)  # re-checked here; the browser's suggestion isn't trusted
                     old = S.devices.get(hint["mac"]) if hint else None
                     if not old:
                         return self._send(400, {"error": "Sentinel can't match this to one of your devices anymore."})
@@ -3024,7 +3914,13 @@ class Handler(BaseHTTPRequestHandler):
                         a["status"], a["ackAt"] = "closed", a["ackAt"] or t
                         a["log"].append([t, "Closed: same device as %s with a new private address" % hint["label"]])
                     del S.devices[old["mac"]]
-                    add_event(t, "INFO", "%s is back with a new private address (%s, was %s). Merged." % (hint["label"], mac, old["mac"]), "system")
+                    add_event(
+                        t,
+                        "INFO",
+                        "%s is back with a new private address (%s, was %s). Merged."
+                        % (hint["label"], mac, old["mac"]),
+                        "system",
+                    )
                     msg = "Merged. This is %s now." % dev_label(d)
                 elif act == "forget":
                     del S.devices[mac]
@@ -3059,9 +3955,23 @@ def main():
     INGEST_TOKEN = load_token(INGEST_TOKEN_FILE, 32)
     S.load()
     S.my_ips = my_addresses()
-    for fn in (journal_loop, sampler_loop, saver_loop, notifier_loop, summary_loop,
-               geo_loop, devices_loop, portscan_loop, tailscale_loop, autoblock_loop, syslog_loop, pf_loop, wazuh_loop,
-               log_watch_loop, watchdog_loop):
+    for fn in (
+        journal_loop,
+        sampler_loop,
+        saver_loop,
+        notifier_loop,
+        summary_loop,
+        geo_loop,
+        devices_loop,
+        portscan_loop,
+        tailscale_loop,
+        autoblock_loop,
+        syslog_loop,
+        pf_loop,
+        wazuh_loop,
+        log_watch_loop,
+        watchdog_loop,
+    ):
         threading.Thread(target=fn, daemon=True).start()
     srv = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
     print("Sentinel agent %s listening on %s:%d" % (VERSION, BIND_HOST, BIND_PORT), flush=True)
