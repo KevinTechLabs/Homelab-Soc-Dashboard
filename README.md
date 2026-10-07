@@ -1,7 +1,5 @@
 # Homelab SOC Dashboard
 
-[![CI](https://github.com/KevinTechLabs/Homelab-Soc-Dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/KevinTechLabs/Homelab-Soc-Dashboard/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 A self-hosted **security operations center (SOC) dashboard and network threat monitor** for a home lab. The dashboard is called **Sentinel**. It runs on an Ubuntu server, watches the server and the whole home network in real time, maps detections to **MITRE ATT&CK**, pulls in **pfSense** firewall logs, and sends alerts to **Discord**.
 
 ![Overview](docs/screenshots/overview.png)
