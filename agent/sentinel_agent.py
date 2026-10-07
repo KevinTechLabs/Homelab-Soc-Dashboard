@@ -2953,7 +2953,7 @@ WZ_DEFAULTS = {
     "api": "https://127.0.0.1:55000",
     "dashboard": "",
     "user": "",
-    "password": "",
+    "password": "",  # nosec B105 - empty default, filled from config
     "apiUser": "",
     "apiPassword": "",
     "pins": {},
@@ -2968,7 +2968,7 @@ WZ = {
     "vulns": {},
     "cursor": "now-15m",
     "seen": collections.deque(maxlen=4000),
-    "token": "",
+    "token": "",  # nosec B105 - empty until login
     "tokenAt": 0,
     "status": {},
     "apiOk": None,
@@ -3382,7 +3382,7 @@ def wazuh_setup():
     except WzError as ex:
         sys.exit("  Indexer: %s" % ex)
     try:
-        WZ["token"] = ""
+        WZ["token"] = ""  # nosec B105 - clearing the cached token
         r = wz_api(c, "/agents?limit=500&select=id,name,status")
         items = (r.get("data") or {}).get("affected_items") or []
         print(
