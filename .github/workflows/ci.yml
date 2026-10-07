@@ -45,7 +45,11 @@ jobs:
             -f custom --msg-template "::error file={relpath},line={line}::Bandit {test_id} ({severity}): {msg}"
 
       - name: ShellCheck
-        run: shellcheck install-server.sh
+        # gcc format turned into annotations, so findings show up on the PR diff.
+        run: |
+          set -o pipefail
+          shellcheck -f gcc install-server.sh \
+            | sed -E 's/^([^:]+):([0-9]+):([0-9]+): ([a-z]+): (.*)$/::error file=\1,line=\2,col=\3::ShellCheck \5/'
 
       - name: Tests
         run: uv run --no-project --with "pytest>=8" pytest
