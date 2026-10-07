@@ -40,7 +40,9 @@ jobs:
           uvx "ruff@${RUFF_VERSION}" format --check .
 
       - name: Bandit (Python SAST)
-        run: uvx --from "bandit[toml]>=1.8,<2" bandit -c pyproject.toml -r agent -q
+        run: |
+          uvx --from "bandit[toml]>=1.8,<2" bandit -c pyproject.toml -r agent -q \
+            -f custom --msg-template "::error file={relpath},line={line}::Bandit {test_id} ({severity}): {msg}"
 
       - name: ShellCheck
         run: shellcheck install-server.sh
