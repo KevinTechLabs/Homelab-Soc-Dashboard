@@ -24,6 +24,7 @@ Standard library only. Listens on 127.0.0.1:8765; nginx forwards /api/ to it.
 
 import base64
 import collections
+import contextlib
 import getpass
 import hashlib
 import hmac
@@ -41,10 +42,10 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -856,7 +857,7 @@ WATCH = [
 
 def unit_files():
     rc, out, _ = run(["systemctl", "list-unit-files", "--type=service,socket", "--no-legend", "--no-pager"])
-    return {l.split()[0] for l in out.splitlines() if l.strip()} if rc == 0 else set()
+    return {ln.split()[0] for ln in out.splitlines() if ln.strip()} if rc == 0 else set()
 
 
 _units = {"at": 0, "set": set()}
@@ -876,7 +877,7 @@ def sample_services():
         if n == "ssh":
             q.append("ssh.socket")
     rc, out, _ = run(["systemctl", "is-active"] + q)
-    states = dict(zip(q, out.split()))
+    states = dict(zip(q, out.split(), strict=False))
     desc = dict(WATCH)
     res = []
     for n in names:
@@ -1116,7 +1117,7 @@ def sampler_loop():
                         listen_procs = None  # refresh below, outside the lock is nicer but data is small
                     lports = {s[2] for s in listen}
                     peers, protos, cur = [], collections.Counter(), set()
-                    for st, lip, lp, rip, rp, ino in est:
+                    for _st, lip, lp, rip, rp, _ino in est:
                         if is_loopback(rip) or is_loopback(lip):
                             continue
                         inbound = lp in lports
@@ -1133,7 +1134,7 @@ def sampler_loop():
                                 "lan": is_private(rip),
                             }
                         )
-                    for c in cur - seen_conns:
+                    for _ in cur - seen_conns:
                         S.new_conns.append(t)
                     seen_conns = cur
                     while S.new_conns and S.new_conns[0] < t - 60000:
@@ -1147,7 +1148,7 @@ def sampler_loop():
                 listen_procs = socket_procs([s[5] for s in listen])
                 with LOCK:
                     rows, seen = [], set()
-                    for st, lip, lp, rip, rp, ino in listen:
+                    for _st, lip, lp, _rip, _rp, ino in listen:
                         exposed = not is_loopback(lip)
                         k = (lp, exposed)
                         if k in seen:
@@ -1295,10 +1296,8 @@ def pf_pubkey(create=True):
     if not os.path.exists(pub) and create:
         os.makedirs(os.path.dirname(PF_KEY), exist_ok=True)
         run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "sentinel@" + HOST, "-f", PF_KEY])
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(PF_KEY, 0o600)
-        except Exception:
-            pass
     try:
         with open(pub) as f:
             return f.read().strip()
@@ -1635,7 +1634,7 @@ def syslog_loop():
     try:
         sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sk.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sk.bind(("0.0.0.0", port))
+        sk.bind(("0.0.0.0", port))  # noqa: S104  # nosec B104 - pfSense sends syslog from the LAN
     except Exception as ex:
         print("sentinel: can't listen for pfSense logs on UDP %d: %s" % (port, ex), file=sys.stderr)
         return
@@ -1864,7 +1863,7 @@ def ingest_alertmanager(body, t):
             continue
         fp = (
             clean(al.get("fingerprint"), 32)
-            or hashlib.sha1(json.dumps(labels, sort_keys=True).encode()).hexdigest()[:16]
+            or hashlib.sha1(json.dumps(labels, sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:16]
         )
         started = rfc3339_ms(al.get("startsAt"), t)
         key = "am:%s:%s:%d" % (src, fp, started)  # a new firing episode gets a new alert
@@ -1932,7 +1931,7 @@ def ingest_event(body, t):
         return {"alert": None}
     labels = {"mitre_technique": clean(body.get("technique"), 16), "mitre_tactic": clean(body.get("tactic"), 32)}
     tech, tac = ext_mapping(labels)
-    dedupe = clean(body.get("key"), 80) or hashlib.sha1((title + text).encode()).hexdigest()[:16]
+    dedupe = clean(body.get("key"), 80) or hashlib.sha1((title + text).encode(), usedforsecurity=False).hexdigest()[:16]
     a = upsert_alert("evt:%s:%s" % (src, dedupe), level, title, tech, tac, text.rstrip("."), t, src=src)
     a["host"] = src
     a["ext"] = {"from": clean(body.get("kind"), 24) or "Event"}
@@ -2442,7 +2441,7 @@ def load_oui():
         "/usr/share/nmap/nmap-mac-prefixes",
     ):
         try:
-            f = open(path, errors="replace")
+            f = open(path, errors="replace")  # noqa: SIM115 - closed by the `with f:` below
         except OSError:
             continue
         with f:
@@ -2454,7 +2453,7 @@ def load_oui():
                     k, _, v = line.partition("(hex)")
                     k = k.strip().replace("-", "")
                 else:
-                    parts = re.split(r"\s+", line, 1)
+                    parts = re.split(r"\s+", line, maxsplit=1)
                     if len(parts) < 2:
                         continue
                     k, v = parts[0].replace(":", "").replace("-", ""), parts[1]
@@ -2925,7 +2924,7 @@ def tailscale_loop():
                                 info["first"] = t
                                 S.tailnet[pid] = info
                                 if not first:
-                                    a = upsert_alert(
+                                    upsert_alert(
                                         "ts:%s" % pid,
                                         "high",
                                         "New device joined your Tailscale network",
@@ -2988,7 +2987,7 @@ def wz_conf():
     except FileNotFoundError:
         return None
     except Exception as ex:
-        raise WzError("Couldn't read %s: %s" % (WAZUH_FILE, ex))
+        raise WzError("Couldn't read %s: %s" % (WAZUH_FILE, ex)) from ex
 
 
 def wz_cert(base, timeout=8):
@@ -2997,9 +2996,11 @@ def wz_cert(base, timeout=8):
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((u.hostname, u.port or 443), timeout=timeout) as raw:
-        with ctx.wrap_socket(raw, server_hostname=u.hostname) as tls:
-            return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
+    with (
+        socket.create_connection((u.hostname, u.port or 443), timeout=timeout) as raw,
+        ctx.wrap_socket(raw, server_hostname=u.hostname) as tls,
+    ):
+        return hashlib.sha256(tls.getpeercert(binary_form=True)).hexdigest()
 
 
 def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None, timeout=20, pin=None):
@@ -3040,7 +3041,7 @@ def wz_request(base, path, conf, method="GET", body=None, auth=None, token=None,
             raise WzError("Wazuh answered HTTP %d: %s" % (r.status, raw[:160].decode("utf-8", "replace")))
         return json.loads(raw or b"{}")
     except (OSError, ssl.SSLError) as ex:
-        raise WzError("Can't reach %s (%s)." % (base, ex))
+        raise WzError("Can't reach %s (%s)." % (base, ex)) from ex
     finally:
         conn.close()
 
@@ -3283,10 +3284,8 @@ def wazuh_loop():
                         WZ["apiOk"], WZ["apiMsg"] = True, "Connected"
                 except WzError as ex:
                     WZ["apiOk"], WZ["apiMsg"], WZ["token"] = False, str(ex), ""
-                try:
+                with contextlib.suppress(WzError):
                     wz_stats(conf)
-                except WzError:
-                    pass
         elif conf is None and WZ["ok"] is not False:
             WZ["ok"], WZ["msg"] = None, ""
         time.sleep(60)
@@ -3342,8 +3341,8 @@ def wazuh_setup():
         for i in my_addresses()
         if not is_loopback(i)
         and ":" not in i
-        and not ipaddress.ip_address(i) in ipaddress.ip_network("172.16.0.0/12")
-        and not ipaddress.ip_address(i) in ipaddress.ip_network("100.64.0.0/10")
+        and ipaddress.ip_address(i) not in ipaddress.ip_network("172.16.0.0/12")
+        and ipaddress.ip_address(i) not in ipaddress.ip_network("100.64.0.0/10")
     )
     if not c.get("dashboard") and lan:
         c["dashboard"] = "https://%s:8443" % lan[0]

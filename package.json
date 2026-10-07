@@ -5,7 +5,7 @@
   "description": "Homelab SOC dashboard and network threat monitor (Sentinel)",
   "main": "main.js",
   "author": "Kevin Marcotte",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win nsis portable",
