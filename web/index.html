@@ -482,7 +482,7 @@ a.btn{text-decoration:none;color:var(--ink);display:inline-flex;align-items:cent
                 <b style="color:var(--ink);font-weight:600">Send pfSense's log to Sentinel</b>
                 <ol>
                   <li>In pfSense, open <b style="color:var(--ink)">Status → System Logs → Settings</b>.</li>
-                  <li>Under <b style="color:var(--ink)">Remote Logging Options</b>, tick <b style="color:var(--ink)">Enable Remote Logging</b>. Set Source Address to <b style="color:var(--ink)">LAN</b> and IP Protocol to <b style="color:var(--ink)">IPv4</b>.</li>
+                  <li>Under <b style="color:var(--ink)">Remote Logging Options</b>, tick <b style="color:var(--ink)">Enable Remote Logging</b>. Leave Source Address on <b style="color:var(--ink)">Default (any)</b> and set IP Protocol to <b style="color:var(--ink)">IPv4</b>. (Binding it to LAN can make pfSense silently stop sending after an interface or filter reload.)</li>
                   <li>In <b style="color:var(--ink)">Remote log servers</b>, enter:<div class="topic" style="margin-top:6px"><code id="pfSyslog">…</code><button class="btn" type="button" data-copy="pfSyslog">Copy</button></div></li>
                   <li>Under <b style="color:var(--ink)">Remote Syslog Contents</b>, tick <b style="color:var(--ink)">Firewall Events</b> and <b style="color:var(--ink)">DHCP service events</b>, then <b style="color:var(--ink)">Save</b>.</li>
                 </ol>

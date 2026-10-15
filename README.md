@@ -195,7 +195,7 @@ Alerts tab, and `/api/state` lists every source under `integrations`. Tests:
 
 ## pfSense integration
 
-**Firewall and DHCP logs (recommended):** in pfSense, go to **Status → System Logs → Settings → Remote Logging**. Set the remote server to `SERVER-IP:5140` and tick **Firewall Events** and **DHCP Events**. You get:
+**Firewall and DHCP logs (recommended):** in pfSense, go to **Status → System Logs → Settings → Remote Logging**. Set the remote server to `SERVER-IP:5140`, leave **Source Address** on **Default (any)**, and tick **Firewall Events** and **DHCP Events**. You get:
 - everything the router blocks, rolled up per attacker
 - port scans stopped at the router
 - attackers shown in green on the map
@@ -212,7 +212,7 @@ This gives the server the ability to change your router's firewall, so skip it i
 | Symptom | Cause and fix |
 |---|---|
 | Devices in other zones show **offline** while they're actually online | Without the SSH device list, Sentinel only learns about other zones from DHCP log events and marks a device offline 3 hours after the last one. Connect the device list (above). If the Respond tab says the router firewall log stopped, see the next row. |
-| **Router firewall log** stopped updating (Sentinel raises **"pfSense logs stopped arriving"** after 30 minutes) | Check that packets arrive with `sudo tcpdump -ni <iface> udp port 5140`. If nothing arrives, pfSense stopped sending: untick and re-tick **Enable Remote Logging** and save, which restarts its syslog daemon. In my lab this happened twice with **Source Address** set to **LAN**. Switching it to **Default (any)** is the fix being tested. |
+| **Router firewall log** stopped updating (Sentinel raises **"pfSense logs stopped arriving"** after 30 minutes) | Check that packets arrive with `sudo tcpdump -ni <iface> udp port 5140`. If nothing arrives, pfSense stopped sending: untick and re-tick **Enable Remote Logging** and save, which restarts its syslog daemon. In my lab this happened twice with **Source Address** set to **LAN**; leave it on **Default (any)**, which binds pfSense's syslog daemon to all addresses so an interface or filter reload can't strand it. |
 | A phone shows up as a **new device** every time it rejoins | iOS/Android "rotating" private Wi-Fi addresses. Open the new device: Sentinel offers **Same device: merge** when it matches one you already named. Setting the phone's private address to **Fixed** for your home network stops it. |
 | Only some devices have a **glowing line** on the network map | By design. A glowing line means a live connection to the server right now (Pi-hole glows because the server uses it for DNS), not that the device is online. The green dot shows online status. |
 
